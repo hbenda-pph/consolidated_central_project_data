@@ -64,7 +64,10 @@ TABLE_NAME = "companies"
 
 #### Comandos Principales
 ```bash
-# Análisis de prueba (recomendado primero)
+# Diagnóstico del sistema (recomendado primero)
+python diagnostic_test.py
+
+# Análisis de prueba (después del diagnóstico)
 python cloud_shell_runner.py test
 
 # Generar vistas Silver únicamente
@@ -163,6 +166,46 @@ Cada ejecución crea un directorio en `execution_sessions/` con:
 - `operations.json` - Historial de operaciones
 - `rollback.sql` - Script de rollback generado
 - `session_summary.json` - Resumen de la sesión
+
+## 🔧 Resolución de Problemas
+
+### Diagnóstico del Sistema
+Si encuentras errores, ejecuta primero el diagnóstico:
+```bash
+python diagnostic_test.py
+```
+
+Este script verificará:
+- ✅ Importación de configuración
+- ✅ Cliente BigQuery
+- ✅ Acceso a tabla de compañías
+- ✅ Obtención de muestra de compañías
+- ✅ Acceso a tablas de compañías
+
+### Errores Comunes
+
+#### Error: "cannot import name 'main'"
+**Solución**: Los scripts ahora tienen función `main()` exportable. Reinstala las dependencias si es necesario.
+
+#### Error: "Error obteniendo información de compañías"
+**Posibles causas**:
+- Proyecto BigQuery no configurado
+- Permisos insuficientes
+- Tabla de compañías no existe
+- Configuración incorrecta en `config.py`
+
+#### Error: "Tabla no encontrada"
+**Posibles causas**:
+- Compañía no tiene la tabla específica
+- Nombre de dataset incorrecto
+- Permisos insuficientes en proyecto de compañía
+
+### Logs Detallados
+Todos los scripts generan logs detallados que incluyen:
+- Configuración utilizada
+- Consultas SQL ejecutadas
+- Errores específicos con stack trace
+- Resultados de cada paso
 
 ## 🔧 Personalización
 

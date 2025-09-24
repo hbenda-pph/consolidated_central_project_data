@@ -33,14 +33,22 @@ except Exception as e:
 
 def get_companies_info():
     """Obtiene información de las compañías activas"""
-    query = f"""
-        SELECT company_id, company_name, company_project_id
-        FROM `{PROJECT_SOURCE}.{DATASET_NAME}.{TABLE_NAME}`
-        WHERE company_bigquery_status IS NOT NULL
-        ORDER BY company_id
-        LIMIT {MAX_COMPANIES_FOR_TEST}  # Limitar para prueba
-    """
-    return pd.DataFrame([dict(row) for row in client.query(query).result()])
+    try:
+        query = f"""
+            SELECT company_id, company_name, company_project_id
+            FROM `{PROJECT_SOURCE}.{DATASET_NAME}.{TABLE_NAME}`
+            WHERE company_bigquery_status IS NOT NULL
+            ORDER BY company_id
+            LIMIT {MAX_COMPANIES_FOR_TEST}  # Limitar para prueba
+        """
+        print(f"🔍 Ejecutando consulta: {query}")
+        result = client.query(query).result()
+        companies_df = pd.DataFrame([dict(row) for row in result])
+        print(f"✅ Obtenidas {len(companies_df)} compañías")
+        return companies_df
+    except Exception as e:
+        print(f"❌ Error obteniendo información de compañías: {str(e)}")
+        return pd.DataFrame()
 
 def get_table_fields_with_types(project_id, table_name):
     """Obtiene campos con sus tipos de datos de una tabla específica"""
@@ -69,7 +77,19 @@ def analyze_table_data_types(table_name):
     print(f"\n🔍 ANALIZANDO TIPOS DE DATOS PARA: {table_name}")
     print("=" * 80)
     
-    companies_df = get_companies_info()
+    try:
+        companies_df = get_companies_info()
+        
+        if companies_df.empty:
+            print("❌ No se pudieron obtener las compañías")
+            return None
+            
+        print(f"📋 Compañías a analizar: {len(companies_df)}")
+        
+    except Exception as e:
+        print(f"❌ Error en análisis inicial: {str(e)}")
+        return None
+    
     field_type_analysis = defaultdict(list)
     field_presence = Counter()
     
@@ -347,18 +367,41 @@ def test_data_type_analysis():
         print(f"❌ No se pudo analizar la tabla '{test_table}'")
         return None
 
-if __name__ == "__main__":
-    # Ejecutar análisis de prueba
-    result = test_data_type_analysis()
-    
-    if result:
-        print(f"\n🎯 ANÁLISIS COMPLETADO")
-        print(f"📊 Campos sin conflicto: {len(result['field_consensus'])}")
-        print(f"⚠️  Campos con conflicto: {len(result['type_conflicts'])}")
+def main():
+    """Función principal para ejecutar análisis de tipos de datos"""
+    try:
+        print("🔍 Iniciando análisis de tipos de datos...")
         
-        if result['type_conflicts']:
-            print(f"\n⚠️  CAMPOS CON CONFLICTOS DE TIPO:")
-            for field_name, conflict in result['type_conflicts'].items():
-                print(f"  - {field_name}: {', '.join(conflict['types'])} → {conflict['consensus_type']}")
-    else:
-        print(f"\n❌ No se pudo completar el análisis")
+        # Verificar configuración
+        print(f"📋 Configuración:")
+        print(f"  - Proyecto fuente: {PROJECT_SOURCE}")
+        print(f"  - Dataset: {DATASET_NAME}")
+        print(f"  - Tabla: {TABLE_NAME}")
+        print(f"  - Límite compañías: {MAX_COMPANIES_FOR_TEST}")
+        
+        # Ejecutar análisis de prueba
+        result = test_data_type_analysis()
+        
+        if result:
+            print(f"\n🎯 ANÁLISIS COMPLETADO")
+            print(f"📊 Campos sin conflicto: {len(result['field_consensus'])}")
+            print(f"⚠️  Campos con conflicto: {len(result['type_conflicts'])}")
+            
+            if result['type_conflicts']:
+                print(f"\n⚠️  CAMPOS CON CONFLICTOS DE TIPO:")
+                for field_name, conflict in result['type_conflicts'].items():
+                    print(f"  - {field_name}: {', '.join(conflict['types'])} → {conflict['consensus_type']}")
+            
+            return True
+        else:
+            print(f"\n❌ No se pudo completar el análisis")
+            return False
+            
+    except Exception as e:
+        print(f"💥 Error inesperado en main(): {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+if __name__ == "__main__":
+    main()

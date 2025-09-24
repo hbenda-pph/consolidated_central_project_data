@@ -209,8 +209,10 @@ def run_basic_test():
         import test_single_table_analysis
         import generate_silver_views
         import analyze_data_types
+        import diagnostic_test
         
         print("✅ Módulos de prueba importados correctamente")
+        print("💡 Para ejecutar diagnóstico completo, usa: python diagnostic_test.py")
         print("💡 Para ejecutar prueba completa, usa: python cloud_shell_runner.py test")
         
         return True
