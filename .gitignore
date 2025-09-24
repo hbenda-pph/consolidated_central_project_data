@@ -1,0 +1,40 @@
+# Archivos generados
+generated_views/
+silver_views_*/
+central_consolidated_views_*/
+test_*_silver_view.sql
+
+# Logs
+*.log
+consolidation_log_*
+
+# Archivos temporales
+*.tmp
+*.temp
+__pycache__/
+*.pyc
+*.pyo
+
+# Archivos de configuración local
+config_local.py
+.env
+
+# Archivos de salida de pruebas
+*_analysis_*.csv
+*_comparison_*.csv
+*_company_*.csv
+*_matrix_*.csv
+*_summary_*.csv
+
+# Archivos de Excel
+*.xlsx
+*.xls
+
+# Archivos de imagen
+*.png
+*.jpg
+*.pdf
+
+# Archivos de backup
+*.bak
+*.backup
