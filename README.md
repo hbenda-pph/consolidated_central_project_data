@@ -12,6 +12,7 @@ Implementar la **Estrategia Híbrida** de consolidación de datos:
 - **Normalización de Tipos**: Detecta y resuelve conflictos de tipos de datos
 - **CAST Inteligente**: Convierte automáticamente tipos incompatibles
 - **Valores por Defecto**: Rellena campos faltantes con valores apropiados
+- **Filtro ETL**: Excluye campos `_fivetran` (campos del ETL que permanecen solo en Bronze)
 
 ## 📁 Archivos del Repositorio
 
@@ -178,6 +179,12 @@ El script detecta automáticamente conflictos de tipos de datos y los resuelve:
 - **STRING → INT64**: `SAFE_CAST(field AS INT64)`
 - **INT64 → FLOAT64**: `CAST(field AS FLOAT64)`
 - **Conversiones complejas**: `COALESCE(SAFE_CAST(field AS target_type), default_value)`
+
+### Filtro de Campos ETL
+El script excluye automáticamente campos con prefijo `_fivetran`:
+- **Campos Fivetran**: `_fivetran_deleted`, `_fivetran_synced`, etc.
+- **Razón**: Estos campos son metadatos del ETL y deben permanecer solo en la capa Bronze
+- **Implementación**: Filtrado automático en todos los análisis y generación de vistas
 
 ### Tablas Procesadas
 Se procesan automáticamente todas las tablas identificadas en el análisis:

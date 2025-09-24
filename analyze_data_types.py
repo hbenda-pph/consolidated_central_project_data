@@ -86,8 +86,11 @@ def analyze_table_data_types(table_name):
         
         print(f"  ✅ {company_name}: {len(fields_df)} campos")
         
+        # Filtrar campos _fivetran (campos del ETL que deben quedarse solo en Bronze)
+        filtered_fields_df = fields_df[~fields_df['column_name'].str.startswith('_fivetran')]
+        
         # Analizar cada campo
-        for _, field in fields_df.iterrows():
+        for _, field in filtered_fields_df.iterrows():
             field_name = field['column_name']
             data_type = field['data_type']
             

@@ -66,7 +66,9 @@ for _, company in companies.iterrows():
         print(f"  ⚠️  {company_name}: Tabla '{TEST_TABLE}' no encontrada")
         continue
     
-    fields = fields_df['column_name'].tolist()
+    # Filtrar campos _fivetran (campos del ETL que deben quedarse solo en Bronze)
+    filtered_fields_df = fields_df[~fields_df['column_name'].str.startswith('_fivetran')]
+    fields = filtered_fields_df['column_name'].tolist()
     all_fields.update(fields)
     
     results.append({
@@ -74,7 +76,7 @@ for _, company in companies.iterrows():
         'project_id': project_id,
         'fields': fields,
         'field_count': len(fields),
-        'fields_df': fields_df
+        'fields_df': filtered_fields_df
     })
     
     print(f"  ✅ {company_name}: {len(fields)} campos")
@@ -198,3 +200,12 @@ FROM `{first_company['project_id']}.servicetitan_{first_company['project_id'].re
     print(f"\n💾 SQL guardado en: test_{TEST_TABLE}_silver_view.sql")
 
 print(f"\n✅ Prueba completada!")
+
+def main():
+    """Función principal para ejecutar análisis de prueba"""
+    print("🧪 Ejecutando análisis de tabla individual...")
+    # El código principal ya se ejecutó arriba
+    return True
+
+if __name__ == "__main__":
+    main()

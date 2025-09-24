@@ -116,10 +116,12 @@ def analyze_table_fields_across_companies(table_name):
             print(f"  ⚠️  {company_name}: Tabla '{table_name}' no encontrada")
             continue
             
-        fields_list = fields_df['column_name'].tolist()
+        # Filtrar campos _fivetran (campos del ETL que deben quedarse solo en Bronze)
+        filtered_fields_df = fields_df[~fields_df['column_name'].str.startswith('_fivetran')]
+        fields_list = filtered_fields_df['column_name'].tolist()
         field_count = len(fields_list)
         
-        print(f"  ✅ {company_name}: {field_count} campos")
+        print(f"  ✅ {company_name}: {field_count} campos (filtrados _fivetran)")
         
         # Guardar información
         table_analysis_results.append({
@@ -128,7 +130,7 @@ def analyze_table_fields_across_companies(table_name):
             'project_id': project_id,
             'field_count': field_count,
             'fields': fields_list,
-            'fields_df': fields_df
+            'fields_df': filtered_fields_df
         })
         
         all_table_fields.update(fields_list)

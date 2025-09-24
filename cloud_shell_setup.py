@@ -205,8 +205,10 @@ def run_basic_test():
     print("\n🧪 Ejecutando prueba básica...")
     
     try:
-        # Importar y ejecutar análisis básico
-        from test_single_table_analysis import main as test_main
+        # Importar módulos de prueba
+        import test_single_table_analysis
+        import generate_silver_views
+        import analyze_data_types
         
         print("✅ Módulos de prueba importados correctamente")
         print("💡 Para ejecutar prueba completa, usa: python cloud_shell_runner.py test")
