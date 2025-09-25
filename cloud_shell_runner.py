@@ -261,7 +261,8 @@ class CloudShellRunner:
     def validate_silver_views(self):
         """Valida las vistas Silver creadas"""
         try:
-            report = self.monitoring_manager.monitor_silver_views()
+            results = self.monitoring_manager.monitor_silver_views()
+            report = self.monitoring_manager.generate_monitoring_report(silver_results=results)
             self.monitoring_manager.print_monitoring_summary(report)
             return report['summary']['silver_errors'] == 0
         except Exception as e:
@@ -271,7 +272,8 @@ class CloudShellRunner:
     def validate_consolidated_views(self):
         """Valida las vistas consolidadas creadas"""
         try:
-            report = self.monitoring_manager.monitor_consolidated_views()
+            results = self.monitoring_manager.monitor_consolidated_views()
+            report = self.monitoring_manager.generate_monitoring_report(consolidated_results=results)
             self.monitoring_manager.print_monitoring_summary(report)
             return report['summary']['consolidated_errors'] == 0
         except Exception as e:
