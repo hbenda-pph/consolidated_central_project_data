@@ -249,14 +249,7 @@ def generate_silver_view_sql(table_analysis, company_result):
         default_value = get_default_value_for_type(target_type)
         silver_fields.append(f"    {default_value} as {field_name}")
     
-    # 4. Metadata fields
-    for metadata_field in METADATA_FIELDS:
-        if metadata_field == 'source_project':
-            silver_fields.append(f"    '{project_id}' as {metadata_field}")
-        elif metadata_field == 'silver_processed_at':
-            silver_fields.append(f"    CURRENT_TIMESTAMP() as {metadata_field}")
-        elif metadata_field == 'company_name':
-            silver_fields.append(f"    '{company_name}' as {metadata_field}")
+    # 4. Metadata fields (eliminados - no necesarios en vistas por compañía)
     
     # Crear SQL
     dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
@@ -453,16 +446,19 @@ def generate_all_silver_views():
             company_name = company_result['company_name']
             project_id = company_result['project_id']
             
-            # Generar SQL
+            # Generar y ejecutar SQL directamente
             sql_content = generate_silver_view_sql(table_analysis, company_result)
             
-            # Guardar archivo SQL
-            sql_filename = f"{output_dir}/silver_{table_name}_{project_id}.sql"
-            with open(sql_filename, 'w', encoding='utf-8') as f:
-                f.write(sql_content)
-            
-            company_sql_files.append(sql_filename)
-            print(f"    ✅ {company_name}: {sql_filename}")
+            # Ejecutar vista directamente en BigQuery
+            try:
+                print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
+                query_job = client.query(sql_content)
+                query_job.result()  # Esperar a que termine
+                print(f"    ✅ Vista creada: {company_name}")
+                company_sql_files.append(f"SUCCESS: {company_name}")
+            except Exception as e:
+                print(f"    ❌ Error creando vista {company_name}: {str(e)}")
+                company_sql_files.append(f"ERROR: {company_name}")
         
         # Crear archivo consolidado para la tabla
         consolidated_filename = f"{output_dir}/consolidated_{table_name}_analysis.sql"

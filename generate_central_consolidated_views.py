@@ -108,16 +108,19 @@ def generate_all_consolidated_views():
     
     for table_name in tables_to_process:
         try:
-            # Generar SQL para la vista consolidada
+            # Generar y ejecutar SQL directamente
             sql_content = generate_consolidated_view_sql(table_name, companies_df)
             
-            # Guardar archivo
-            filename = f"{output_dir}/central_consolidated_{table_name}.sql"
-            with open(filename, 'w', encoding='utf-8') as f:
-                f.write(sql_content)
-            
-            generated_files.append(filename)
-            print(f"  ✅ {table_name}: {filename}")
+            # Ejecutar vista directamente en BigQuery
+            try:
+                print(f"  🔄 Creando vista consolidada: {CENTRAL_PROJECT}.central-silver.vw_consolidated_{table_name}")
+                query_job = client.query(sql_content)
+                query_job.result()  # Esperar a que termine
+                print(f"  ✅ Vista consolidada creada: {table_name}")
+                generated_files.append(f"SUCCESS: {table_name}")
+            except Exception as e:
+                print(f"  ❌ Error creando vista consolidada {table_name}: {str(e)}")
+                generated_files.append(f"ERROR: {table_name}")
             
         except Exception as e:
             print(f"  ❌ Error en {table_name}: {str(e)}")
