@@ -423,11 +423,47 @@ def get_default_value_for_type(data_type):
     }
     return defaults.get(data_type, 'NULL')
 
+def generate_summary_csv(summary_matrix, output_dir):
+    """
+    Genera un archivo CSV con el resumen de estados de creación de vistas
+    """
+    import csv
+    
+    if not summary_matrix:
+        return
+    
+    # Obtener todas las tablas únicas
+    all_tables = set()
+    for company_data in summary_matrix.values():
+        all_tables.update(company_data.keys())
+    all_tables = sorted(list(all_tables))
+    
+    # Crear archivo CSV
+    csv_filename = f"{output_dir}/summary_matrix.csv"
+    
+    with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.writer(csvfile)
+        
+        # Escribir encabezados
+        headers = ['Company'] + all_tables
+        writer.writerow(headers)
+        
+        # Escribir datos
+        for company_name, table_data in sorted(summary_matrix.items()):
+            row = [company_name]
+            for table in all_tables:
+                status = table_data.get(table, 0)  # 0 por defecto si no existe
+                row.append(status)
+            writer.writerow(row)
+    
+    print(f"📊 Matriz de resumen generada: {csv_filename}")
+    print(f"   Estados: 0=Tabla no existe, 1=Éxito, 2=Error")
+
 def generate_all_silver_views():
     """
     Genera vistas Silver para todas las tablas identificadas con seguimiento de estados
     """
-    # print("🚀 Iniciando generación de vistas Silver para todas las tablas")
+    print("🚀 Iniciando generación de vistas Silver para todas las tablas")
     
     # Inicializar gestor de estados
     status_manager = ConsolidationStatusManager()
@@ -439,7 +475,10 @@ def generate_all_silver_views():
         print("ℹ️  No hay compañías pendientes de consolidación")
         return {}, {}
     
-    # print(f"📋 Compañías a procesar: {len(pending_companies)}")
+    # Inicializar matriz de resumen
+    summary_matrix = {}
+    
+    print(f"📋 Compañías a procesar: {len(pending_companies)}")
     
     # Usar configuración centralizada
     tables_to_process = TABLES_TO_PROCESS
@@ -451,10 +490,17 @@ def generate_all_silver_views():
     output_dir = f"{OUTPUT_BASE_DIR}/silver_views_{timestamp}"
     os.makedirs(output_dir, exist_ok=True)
     
-    # print(f"🚀 INICIANDO GENERACIÓN DE VISTAS SILVER")
-    # print(f"📁 Directorio de salida: {output_dir}")
-    # print(f"📋 Tablas a procesar: {len(tables_to_process)}")
-    # print("=" * 80)
+    # Inicializar matriz de resumen
+    for _, company in pending_companies.iterrows():
+        company_name = company['company_name']
+        summary_matrix[company_name] = {}
+        for table_name in tables_to_process:
+            summary_matrix[company_name][table_name] = 0  # Estado inicial
+    
+    print(f"🚀 INICIANDO GENERACIÓN DE VISTAS SILVER")
+    print(f"📁 Directorio de salida: {output_dir}")
+    print(f"📋 Tablas a procesar: {len(tables_to_process)}")
+    print("=" * 80)
     
     for table_name in tables_to_process:
         print(f"\n🔄 Procesando tabla: {table_name}")
@@ -480,14 +526,16 @@ def generate_all_silver_views():
             
             # Ejecutar vista directamente en BigQuery
             try:
-                # print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
+                print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
                 query_job = client.query(sql_content)
                 query_job.result()  # Esperar a que termine
-                # print(f"    ✅ Vista creada: {company_name}")
+                print(f"    ✅ Vista creada: {company_name}")
                 company_sql_files.append(f"SUCCESS: {company_name}")
+                summary_matrix[company_name][table_name] = 1  # Éxito
             except Exception as e:
                 print(f"    ❌ Error creando vista {company_name}: {str(e)}")
                 company_sql_files.append(f"ERROR: {company_name}")
+                summary_matrix[company_name][table_name] = 2  # Error
         
         # Crear archivo consolidado para la tabla
         consolidated_filename = f"{output_dir}/consolidated_{table_name}_analysis.sql"
@@ -570,10 +618,14 @@ def generate_all_silver_views():
     # Mostrar resumen de estados
     status_manager.print_consolidation_summary()
     
+    # Generar archivo CSV de resumen
+    generate_summary_csv(summary_matrix, output_dir)
+    
     print(f"\n🎯 GENERACIÓN COMPLETADA")
     print(f"📁 Directorio: {output_dir}")
     print(f"📊 Tablas procesadas: {len(all_results)}")
     print(f"📄 Resumen: {summary_filename}")
+    print(f"📊 Matriz CSV: {output_dir}/summary_matrix.csv")
     
     return all_results, output_dir
 
@@ -581,5 +633,5 @@ if __name__ == "__main__":
     # Ejecutar generación
     results, output_dir = generate_all_silver_views()
     
-    # print(f"\n✅ Script completado exitosamente!")
-    # print(f"📁 Revisa los archivos en: {output_dir}")
+    print(f"\n✅ Script completado exitosamente!")
+    print(f"📁 Revisa los archivos en: {output_dir}")
