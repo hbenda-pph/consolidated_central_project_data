@@ -260,7 +260,7 @@ def generate_silver_view_sql(table_analysis, company_result):
     
     # Crear SQL
     dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
-        view_name = f"vw_{table_name}"
+    view_name = f"vw_{table_name}"
     
     sql = f"""-- Vista Silver para {company_name} - Tabla {table_name}
 -- Generada automáticamente el {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
