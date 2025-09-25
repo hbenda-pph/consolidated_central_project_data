@@ -222,8 +222,8 @@ def generate_silver_view_sql(table_analysis, company_result):
             silver_fields.append(f"    {field_name}")
         else:
             cast_expression = generate_cast_for_field(field_name, source_type, target_type)
-            silver_fields.append(f"    {cast_expression}")
-    
+            silver_fields.append(f"    {cast_expression} as {field_name}")
+        
     # 2. Procesar campos con conflictos de tipo
     for field_name, conflict_info in table_analysis['type_conflicts'].items():
         target_type = conflict_info['consensus_type']
@@ -233,7 +233,7 @@ def generate_silver_view_sql(table_analysis, company_result):
             silver_fields.append(f"    {field_name}")
         else:
             cast_expression = generate_cast_for_field(field_name, source_type, target_type)
-            silver_fields.append(f"    {cast_expression}")
+            silver_fields.append(f"    {cast_expression} as {field_name}")
     
     # 3. Procesar campos faltantes (con valores por defecto)
     # IMPORTANTE: Mantener layout consistente para UNION ALL
