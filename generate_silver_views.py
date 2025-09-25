@@ -255,13 +255,21 @@ def generate_silver_view_sql(table_analysis, company_result):
     dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
     view_name = f"vw_{table_name}"
     
+    # Agregar comas entre campos (excepto el último)
+    fields_with_commas = []
+    for i, field in enumerate(silver_fields):
+        if i < len(silver_fields) - 1:
+            fields_with_commas.append(field + ",")
+        else:
+            fields_with_commas.append(field)
+    
     sql = f"""-- Vista Silver para {company_name} - Tabla {table_name}
 -- Generada automáticamente el {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 -- Incluye normalización de tipos de datos
 
 CREATE OR REPLACE VIEW `{project_id}.silver.{view_name}` AS (
 SELECT
-{chr(10).join(silver_fields)}
+{chr(10).join(fields_with_commas)}
 FROM `{project_id}.{dataset_name}.{table_name}`
 );
 """
