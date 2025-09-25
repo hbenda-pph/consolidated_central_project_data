@@ -220,7 +220,11 @@ def generate_silver_view_sql(table_analysis, company_result):
             continue
             
         target_type = field_info['type']
-        source_type = company_fields.get(field_name, target_type)
+        source_type = company_fields.get(field_name)
+        
+        # Si el campo no existe en esta compañía, saltarlo
+        if source_type is None:
+            continue
         
         if source_type == target_type:
             silver_fields.append(f"    {field_name}")
@@ -235,7 +239,11 @@ def generate_silver_view_sql(table_analysis, company_result):
             continue
             
         target_type = conflict_info['consensus_type']
-        source_type = company_fields.get(field_name, target_type)
+        source_type = company_fields.get(field_name)
+        
+        # Si el campo no existe en esta compañía, saltarlo
+        if source_type is None:
+            continue
         
         if source_type == target_type:
             silver_fields.append(f"    {field_name}")
