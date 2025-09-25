@@ -169,10 +169,10 @@ def analyze_table_fields_across_companies(table_name):
     print(f"  Campos sin conflicto de tipo: {len(field_consensus)}")
     print(f"  Campos con conflicto de tipo: {len(type_conflicts)}")
     
-    if common_fields:
-        # print(f"\n✅ CAMPOS COMUNES:")
-        # for field in common_fields:
-        #     print(f"    - {field}")
+    # if common_fields:
+    #     print(f"\n✅ CAMPOS COMUNES:")
+    #     for field in common_fields:
+    #         print(f"    - {field}")
     
     if partial_fields:
         print(f"\n⚠️  CAMPOS PARCIALES:")
