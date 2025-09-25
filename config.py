@@ -11,7 +11,7 @@ de vistas Silver y consolidadas.
 # =============================================================================
 
 # Proyecto fuente donde están los datos de las compañías
-PROJECT_SOURCE = "platform-partners-qua"
+PROJECT_SOURCE = "platform-partners-des"
 
 # Proyecto central donde se crearán las vistas consolidadas
 CENTRAL_PROJECT = "pph-central"
