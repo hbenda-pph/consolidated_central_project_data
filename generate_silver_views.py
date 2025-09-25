@@ -236,6 +236,7 @@ def generate_silver_view_sql(table_analysis, company_result):
             silver_fields.append(f"    {cast_expression}")
     
     # 3. Procesar campos faltantes (con valores por defecto)
+    # IMPORTANTE: Mantener layout consistente para UNION ALL
     all_analyzed_fields = set(table_analysis['field_consensus'].keys()) | set(table_analysis['type_conflicts'].keys())
     missing_fields = all_analyzed_fields - company_field_names
     
