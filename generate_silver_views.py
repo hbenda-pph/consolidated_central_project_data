@@ -378,7 +378,9 @@ def generate_cast_for_field(field_name, source_type, target_type):
         ('BOOL', 'STRING'): f"CAST({field_name} AS STRING)",
         ('DATE', 'STRING'): f"CAST({field_name} AS STRING)",
         ('DATETIME', 'STRING'): f"CAST({field_name} AS STRING)",
-        ('TIMESTAMP', 'STRING'): f"CAST({field_name} AS STRING)"
+        ('TIMESTAMP', 'STRING'): f"CAST({field_name} AS STRING)",
+        # JSON a STRING - usar SAFE_CAST con valor por defecto
+        ('JSON', 'STRING'): f"COALESCE(SAFE_CAST({field_name} AS STRING), '')"
     }
     
     cast_key = (source_type, target_type)
