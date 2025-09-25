@@ -215,6 +215,10 @@ def generate_silver_view_sql(table_analysis, company_result):
     
     # 1. Procesar campos comunes (sin conflictos de tipo)
     for field_name, field_info in table_analysis['field_consensus'].items():
+        # SOLO incluir campos que existen en esta compañía
+        if field_name not in company_field_names:
+            continue
+            
         target_type = field_info['type']
         source_type = company_fields.get(field_name, target_type)
         
@@ -226,6 +230,10 @@ def generate_silver_view_sql(table_analysis, company_result):
         
     # 2. Procesar campos con conflictos de tipo
     for field_name, conflict_info in table_analysis['type_conflicts'].items():
+        # SOLO incluir campos que existen en esta compañía
+        if field_name not in company_field_names:
+            continue
+            
         target_type = conflict_info['consensus_type']
         source_type = company_fields.get(field_name, target_type)
         
