@@ -11,6 +11,7 @@ Paso 1: Crear vistas Silver por compañía con layout normalizado
 from google.cloud import bigquery
 import pandas as pd
 import numpy as np
+import time
 from datetime import datetime
 import warnings
 from collections import defaultdict, Counter
@@ -29,9 +30,19 @@ from consolidation_tracking_manager import ConsolidationTrackingManager
 # print(f"   Dataset: {DATASET_NAME}")
 # print(f"   Tabla: {TABLE_NAME}")
 
-# Crear cliente de BigQuery
+# Crear cliente BigQuery con reconexión automática
+def create_bigquery_client():
+    """Crea cliente BigQuery con manejo de reconexión"""
+    try:
+        return bigquery.Client(project=PROJECT_SOURCE)
+    except Exception as e:
+        print(f"⚠️  Error creando cliente BigQuery: {str(e)}")
+        print("🔄 Reintentando conexión...")
+        time.sleep(5)  # Esperar 5 segundos
+        return bigquery.Client(project=PROJECT_SOURCE)
+
 try:
-    client = bigquery.Client(project=PROJECT_SOURCE)
+    client = create_bigquery_client()
     # print(f"✅ Cliente BigQuery creado exitosamente para proyecto: {PROJECT_SOURCE}")
 except Exception as e:
     print(f"❌ Error al crear cliente BigQuery: {str(e)}")
@@ -508,35 +519,49 @@ def generate_all_silver_views():
             # Generar y ejecutar SQL directamente
             sql_content = generate_silver_view_sql(table_analysis, company_result)
             
-            # Ejecutar vista directamente en BigQuery
-            try:
-                print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
-                query_job = client.query(sql_content)
-                query_job.result()  # Esperar a que termine
-                print(f"    ✅ Vista creada: {company_name}")
-                company_sql_files.append(f"SUCCESS: {company_name}")
-                
-                # Actualizar tracking
-                tracking_manager.update_status(
-                    company_id=company_result['company_id'],
-                    table_name=table_name,
-                    status=1,
-                    notes=f"Vista creada exitosamente en {project_id}.silver"
-                )
-                
-            except Exception as e:
-                error_msg = str(e)
-                print(f"    ❌ Error creando vista {company_name}: {error_msg}")
-                company_sql_files.append(f"ERROR: {company_name}")
-                
-                # Actualizar tracking con error
-                tracking_manager.update_status(
-                    company_id=company_result['company_id'],
-                    table_name=table_name,
-                    status=2,
-                    error_message=error_msg,
-                    notes=f"Error al crear vista en {project_id}.silver"
-                )
+            # Ejecutar vista directamente en BigQuery con reconexión automática
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if attempt > 0:
+                        print(f"    🔄 Reintento {attempt + 1}/{max_retries} para {company_name}")
+                        # Recrear cliente en caso de error de autenticación
+                        global client
+                        client = create_bigquery_client()
+                        time.sleep(2)  # Esperar antes del reintento
+                    
+                    print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
+                    query_job = client.query(sql_content)
+                    query_job.result()  # Esperar a que termine
+                    print(f"    ✅ Vista creada: {company_name}")
+                    company_sql_files.append(f"SUCCESS: {company_name}")
+                    
+                    # Actualizar tracking
+                    tracking_manager.update_status(
+                        company_id=company_result['company_id'],
+                        table_name=table_name,
+                        status=1,
+                        notes=f"Vista creada exitosamente en {project_id}.silver"
+                    )
+                    break  # Éxito, salir del loop de reintentos
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    if attempt == max_retries - 1:  # Último intento
+                        print(f"    ❌ Error final creando vista {company_name}: {error_msg}")
+                        company_sql_files.append(f"ERROR: {company_name}")
+                        
+                        # Actualizar tracking con error
+                        tracking_manager.update_status(
+                            company_id=company_result['company_id'],
+                            table_name=table_name,
+                            status=2,
+                            error_message=error_msg,
+                            notes=f"Error al crear vista en {project_id}.silver"
+                        )
+                    else:
+                        print(f"    ⚠️  Error en intento {attempt + 1}: {error_msg}")
+                        continue
         
         # Crear archivo consolidado para la tabla
         consolidated_filename = f"{output_dir}/consolidated_{table_name}_analysis.sql"
