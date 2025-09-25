@@ -1,187 +1,211 @@
 # -*- coding: utf-8 -*-
 """
-Run All Scripts - Consolidated Central Project Data
+Run All - Consolidated Central Project Data
 
-Script maestro que ejecuta todo el proceso de generación de vistas Silver
-y consolidadas usando la configuración centralizada.
+Script maestro para ejecutar todo el proceso de consolidación.
+Proporciona una interfaz unificada para diferentes comandos.
 """
 
 import sys
 import os
 from datetime import datetime
-import logging
-
-# Agregar el directorio actual al path para importar config
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from config import *
-from generate_silver_views import generate_all_silver_views
-from generate_central_consolidated_views import generate_all_consolidated_views
-
-# Configurar logging
-logging.basicConfig(
-    level=getattr(logging, LOG_LEVEL),
-    format=LOG_FORMAT,
-    handlers=[
-        logging.FileHandler(f'consolidation_log_{datetime.now().strftime(TIMESTAMP_FORMAT)}.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-
-logger = logging.getLogger(__name__)
-
-def main():
-    """
-    Función principal que ejecuta todo el proceso
-    """
-    logger.info("🚀 INICIANDO PROCESO COMPLETO DE CONSOLIDACIÓN")
-    logger.info("=" * 80)
-    
-    try:
-        # Validar configuración
-        logger.info("1️⃣ Validando configuración...")
-        validate_config()
-        logger.info("✅ Configuración validada correctamente")
-        
-        # Mostrar configuración
-        logger.info(f"📋 Configuración:")
-        logger.info(f"   Proyecto fuente: {PROJECT_SOURCE}")
-        logger.info(f"   Proyecto central: {CENTRAL_PROJECT}")
-        logger.info(f"   Tablas a procesar: {len(TABLES_TO_PROCESS)}")
-        
-        # Paso 1: Generar vistas Silver
-        logger.info("\n2️⃣ Generando vistas Silver...")
-        logger.info("=" * 50)
-        silver_results, silver_output_dir = generate_all_silver_views()
-        logger.info(f"✅ Vistas Silver generadas en: {silver_output_dir}")
-        
-        # Paso 2: Generar vistas consolidadas
-        logger.info("\n3️⃣ Generando vistas consolidadas...")
-        logger.info("=" * 50)
-        consolidated_output_dir, consolidated_files = generate_all_consolidated_views()
-        logger.info(f"✅ Vistas consolidadas generadas en: {consolidated_output_dir}")
-        
-        # Resumen final
-        logger.info("\n🎯 PROCESO COMPLETADO EXITOSAMENTE")
-        logger.info("=" * 80)
-        logger.info(f"📊 Resumen:")
-        logger.info(f"   Tablas procesadas: {len(silver_results)}")
-        logger.info(f"   Vistas Silver: {silver_output_dir}")
-        logger.info(f"   Vistas consolidadas: {consolidated_output_dir}")
-        logger.info(f"   Archivos generados: {len(consolidated_files)}")
-        
-        # Instrucciones finales
-        logger.info(f"\n📋 PRÓXIMOS PASOS:")
-        logger.info(f"1. Revisar archivos en: {silver_output_dir}")
-        logger.info(f"2. Revisar archivos en: {consolidated_output_dir}")
-        logger.info(f"3. Ejecutar vistas Silver en cada proyecto de compañía")
-        logger.info(f"4. Ejecutar vistas consolidadas en proyecto central: {CENTRAL_PROJECT}")
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Error durante la ejecución: {str(e)}")
-        logger.error("🔍 Revisa los logs para más detalles")
-        return False
-
-def run_test_mode():
-    """
-    Ejecuta el proceso en modo de prueba (solo algunas compañías)
-    """
-    logger.info("🧪 EJECUTANDO EN MODO DE PRUEBA")
-    logger.info("=" * 50)
-    
-    # Importar y ejecutar script de prueba
-    try:
-        from test_single_table_analysis import *
-        logger.info("✅ Prueba completada")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Error en modo de prueba: {str(e)}")
-        return False
 
 def show_help():
-    """
-    Muestra la ayuda del script
-    """
-    print("""
-🔧 CONSOLIDATED CENTRAL PROJECT DATA - Script Maestro
-
-Uso:
-    python run_all.py [comando]
-
-Comandos:
-    all         - Ejecuta todo el proceso (vistas Silver + consolidadas)
-    silver      - Solo genera vistas Silver
-    consolidated - Solo genera vistas consolidadas  
-    test        - Ejecuta modo de prueba
-    config      - Muestra la configuración actual
-    help        - Muestra esta ayuda
-
-Ejemplos:
-    python run_all.py all
-    python run_all.py test
-    python run_all.py config
-""")
+    """Muestra ayuda del script"""
+    print("🚀 CONSOLIDATED CENTRAL PROJECT DATA")
+    print("="*50)
+    print("Script maestro para ejecutar el proceso de consolidación")
+    print()
+    print("USO:")
+    print("  python run_all.py <comando>")
+    print()
+    print("COMANDOS DISPONIBLES:")
+    print("  test        - Ejecutar análisis de prueba (tabla individual)")
+    print("  silver      - Generar vistas Silver para todas las tablas")
+    print("  consolidated - Generar vistas consolidadas centrales")
+    print("  all         - Ejecutar proceso completo")
+    print("  config      - Mostrar configuración actual")
+    print("  help        - Mostrar esta ayuda")
+    print()
+    print("EJEMPLOS:")
+    print("  python run_all.py test")
+    print("  python run_all.py silver")
+    print("  python run_all.py all")
+    print()
 
 def show_config():
-    """
-    Muestra la configuración actual
-    """
-    print("📋 CONFIGURACIÓN ACTUAL:")
-    print("=" * 50)
-    print(f"Proyecto fuente: {PROJECT_SOURCE}")
-    print(f"Proyecto central: {CENTRAL_PROJECT}")
-    print(f"Dataset: {DATASET_NAME}.{TABLE_NAME}")
-    print(f"Tablas a procesar: {len(TABLES_TO_PROCESS)}")
-    print(f"Dataset Silver: {SILVER_DATASET}")
-    print(f"Max compañías para prueba: {MAX_COMPANIES_FOR_TEST}")
-    print(f"Nivel de logging: {LOG_LEVEL}")
+    """Muestra la configuración actual"""
+    print("⚙️  CONFIGURACIÓN ACTUAL")
+    print("="*50)
+    
+    try:
+        import config
+        
+        print(f"Proyecto fuente: {config.PROJECT_SOURCE}")
+        print(f"Proyecto central: {config.CENTRAL_PROJECT}")
+        print(f"Dataset: {config.DATASET_NAME}")
+        print(f"Tabla: {config.TABLE_NAME}")
+        print(f"Campos metadata: {len(config.METADATA_FIELDS)}")
+        
+        if hasattr(config, 'MAX_COMPANIES_FOR_TEST'):
+            print(f"Límite compañías (test): {config.MAX_COMPANIES_FOR_TEST}")
+        
+        print()
+        print("Archivos de configuración encontrados:")
+        config_files = ['config.py', 'requirements.txt']
+        for file in config_files:
+            if os.path.exists(file):
+                print(f"  ✅ {file}")
+            else:
+                print(f"  ❌ {file}")
+                
+    except Exception as e:
+        print(f"❌ Error cargando configuración: {e}")
 
-if __name__ == "__main__":
+def run_test():
+    """Ejecuta análisis de prueba"""
+    print("🧪 EJECUTANDO ANÁLISIS DE PRUEBA")
+    print("="*50)
+    
+    try:
+        import test_single_table_analysis
+        result = test_single_table_analysis.main()
+        
+        if result:
+            print("\n✅ Análisis de prueba completado exitosamente")
+        else:
+            print("\n❌ Análisis de prueba falló")
+            
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error ejecutando análisis de prueba: {e}")
+        return False
+
+def run_silver():
+    """Ejecuta generación de vistas Silver"""
+    print("🔧 GENERANDO VISTAS SILVER")
+    print("="*50)
+    
+    try:
+        import generate_silver_views
+        result = generate_silver_views.generate_all_silver_views()
+        
+        if result:
+            print("\n✅ Generación de vistas Silver completada")
+        else:
+            print("\n❌ Generación de vistas Silver falló")
+            
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error generando vistas Silver: {e}")
+        return False
+
+def run_consolidated():
+    """Ejecuta generación de vistas consolidadas"""
+    print("🔗 GENERANDO VISTAS CONSOLIDADAS")
+    print("="*50)
+    
+    try:
+        import generate_central_consolidated_views
+        result = generate_central_consolidated_views.generate_all_consolidated_views()
+        
+        if result:
+            print("\n✅ Generación de vistas consolidadas completada")
+        else:
+            print("\n❌ Generación de vistas consolidadas falló")
+            
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error generando vistas consolidadas: {e}")
+        return False
+
+def run_all():
+    """Ejecuta proceso completo"""
+    print("🚀 EJECUTANDO PROCESO COMPLETO")
+    print("="*50)
+    print("Este proceso ejecutará todas las etapas de consolidación")
+    print(f"Inicio: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print()
+    
+    results = {}
+    
+    # Etapa 1: Análisis de prueba
+    print("ETAPA 1: Análisis de prueba")
+    results['test'] = run_test()
+    print()
+    
+    if not results['test']:
+        print("❌ Proceso detenido: Análisis de prueba falló")
+        return False
+    
+    # Etapa 2: Generación Silver
+    print("ETAPA 2: Generación de vistas Silver")
+    results['silver'] = run_silver()
+    print()
+    
+    if not results['silver']:
+        print("❌ Proceso detenido: Generación Silver falló")
+        return False
+    
+    # Etapa 3: Generación Consolidada
+    print("ETAPA 3: Generación de vistas consolidadas")
+    results['consolidated'] = run_consolidated()
+    print()
+    
+    # Resumen final
+    print("📊 RESUMEN DEL PROCESO COMPLETO")
+    print("="*50)
+    
+    total_stages = len(results)
+    successful_stages = sum(results.values())
+    
+    for stage, result in results.items():
+        status = "✅" if result else "❌"
+        print(f"  {status} {stage.upper()}")
+    
+    print(f"\nEtapas completadas: {successful_stages}/{total_stages}")
+    print(f"Tasa de éxito: {(successful_stages/total_stages)*100:.1f}%")
+    
+    if successful_stages == total_stages:
+        print(f"\n🎯 ¡PROCESO COMPLETADO EXITOSAMENTE!")
+        print(f"💡 Todas las etapas se ejecutaron correctamente.")
+    else:
+        print(f"\n⚠️  PROCESO COMPLETADO CON ERRORES")
+        print(f"💡 Revisa los errores arriba antes de continuar.")
+    
+    print(f"Fin: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    return successful_stages == total_stages
+
+def main():
+    """Función principal"""
     if len(sys.argv) < 2:
         show_help()
-        sys.exit(1)
+        return
     
     command = sys.argv[1].lower()
     
-    if command == "all":
-        success = main()
-        sys.exit(0 if success else 1)
-        
-    elif command == "test":
-        success = run_test_mode()
-        sys.exit(0 if success else 1)
-        
+    print(f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print()
+    
+    if command == "help":
+        show_help()
     elif command == "config":
         show_config()
-        sys.exit(0)
-        
-    elif command == "help":
-        show_help()
-        sys.exit(0)
-        
+    elif command == "test":
+        run_test()
     elif command == "silver":
-        logger.info("🔄 Generando solo vistas Silver...")
-        try:
-            silver_results, silver_output_dir = generate_all_silver_views()
-            logger.info(f"✅ Vistas Silver generadas en: {silver_output_dir}")
-            sys.exit(0)
-        except Exception as e:
-            logger.error(f"❌ Error: {str(e)}")
-            sys.exit(1)
-            
+        run_silver()
     elif command == "consolidated":
-        logger.info("🔄 Generando solo vistas consolidadas...")
-        try:
-            consolidated_output_dir, consolidated_files = generate_all_consolidated_views()
-            logger.info(f"✅ Vistas consolidadas generadas en: {consolidated_output_dir}")
-            sys.exit(0)
-        except Exception as e:
-            logger.error(f"❌ Error: {str(e)}")
-            sys.exit(1)
-    
+        run_consolidated()
+    elif command == "all":
+        run_all()
     else:
         print(f"❌ Comando desconocido: {command}")
-        show_help()
-        sys.exit(1)
+        print("💡 Usa 'python run_all.py help' para ver comandos disponibles")
+
+if __name__ == "__main__":
+    main()

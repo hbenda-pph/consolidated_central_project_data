@@ -209,11 +209,9 @@ def run_basic_test():
         import test_single_table_analysis
         import generate_silver_views
         import analyze_data_types
-        import diagnostic_test
         
         print("✅ Módulos de prueba importados correctamente")
-        print("💡 Para ejecutar diagnóstico completo, usa: python diagnostic_test.py")
-        print("💡 Para ejecutar prueba completa, usa: python cloud_shell_runner.py test")
+        print("💡 Para ejecutar prueba completa, usa: python test_single_table_analysis.py")
         
         return True
         
@@ -241,7 +239,7 @@ def generate_setup_report(results):
     
     if passed_checks == total_checks:
         print(f"\n🎯 ¡Configuración completada exitosamente!")
-        print(f"💡 Puedes proceder con: python cloud_shell_runner.py test")
+        print(f"💡 Puedes proceder con: python test_single_table_analysis.py")
     else:
         print(f"\n⚠️  Configuración incompleta. Revisa los errores arriba.")
         print(f"💡 Una vez corregidos, ejecuta este script nuevamente.")

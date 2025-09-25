@@ -21,6 +21,7 @@ print("✅ Librerías importadas correctamente")
 
 # Importar configuración centralizada
 from config import *
+from consolidation_status_manager import ConsolidationStatusManager
 
 print(f"🔧 Configuración:")
 print(f"   Proyecto: {PROJECT_SOURCE}")
@@ -45,7 +46,8 @@ def get_companies_info():
             company_name,
             company_new_name,
             company_project_id,
-            company_bigquery_status
+            company_bigquery_status,
+            company_consolidated_status
         FROM `{PROJECT_SOURCE}.{DATASET_NAME}.{TABLE_NAME}`
         WHERE company_bigquery_status IS NOT NULL
         ORDER BY company_id
@@ -401,8 +403,22 @@ def get_default_value_for_type(data_type):
 
 def generate_all_silver_views():
     """
-    Genera vistas Silver para todas las tablas identificadas
+    Genera vistas Silver para todas las tablas identificadas con seguimiento de estados
     """
+    print("🚀 Iniciando generación de vistas Silver para todas las tablas")
+    
+    # Inicializar gestor de estados
+    status_manager = ConsolidationStatusManager()
+    
+    # Obtener compañías pendientes de consolidación
+    pending_companies = status_manager.get_companies_for_consolidation()
+    
+    if pending_companies.empty:
+        print("ℹ️  No hay compañías pendientes de consolidación")
+        return {}, {}
+    
+    print(f"📋 Compañías a procesar: {len(pending_companies)}")
+    
     # Usar configuración centralizada
     tables_to_process = TABLES_TO_PROCESS
     
@@ -498,6 +514,36 @@ def generate_all_silver_views():
         f.write(f"1. Revisar los archivos SQL generados\n")
         f.write(f"2. Ejecutar las vistas Silver en cada proyecto de compañía\n")
         f.write(f"3. Crear las vistas consolidadas en el proyecto central\n")
+    
+    # Actualizar estados de compañías procesadas
+    print(f"\n📊 Actualizando estados de consolidación...")
+    for _, company in pending_companies.iterrows():
+        company_id = company['company_id']
+        company_name = company['company_name']
+        
+        # Verificar si la compañía fue procesada exitosamente
+        company_success = True
+        for table_name in tables_to_process:
+            if table_name in all_results:
+                # Verificar si esta compañía tiene datos para esta tabla
+                company_has_table = any(
+                    result['company_id'] == company_id 
+                    for result in all_results[table_name]['company_results']
+                )
+                if not company_has_table:
+                    # No es un error si la compañía no tiene cierta tabla
+                    continue
+        
+        # Actualizar estado
+        if company_success:
+            status_manager.update_company_status(company_id, status_manager.STATUS['COMPLETED'])
+            print(f"  ✅ {company_name}: Estado actualizado a COMPLETED")
+        else:
+            status_manager.update_company_status(company_id, status_manager.STATUS['ERROR'])
+            print(f"  ❌ {company_name}: Estado actualizado a ERROR")
+    
+    # Mostrar resumen de estados
+    status_manager.print_consolidation_summary()
     
     print(f"\n🎯 GENERACIÓN COMPLETADA")
     print(f"📁 Directorio: {output_dir}")

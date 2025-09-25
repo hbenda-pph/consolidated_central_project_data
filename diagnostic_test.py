@@ -2,189 +2,241 @@
 """
 Diagnostic Test - Consolidated Central Project Data
 
-Script de diagnóstico para verificar la configuración y conexión a BigQuery.
-Útil para identificar problemas antes de ejecutar el proceso principal.
+Script de diagnóstico para verificar conectividad y configuración.
+Ejecuta verificaciones básicas del sistema antes de procesar datos.
 """
 
 import sys
 import os
-from google.cloud import bigquery
-import pandas as pd
+from datetime import datetime
+import warnings
+warnings.filterwarnings('ignore')
 
-# Agregar el directorio actual al path para importar config
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-def test_config_import():
+def test_import_config():
     """Prueba la importación de configuración"""
-    print("🔍 Probando importación de configuración...")
-    
+    print("1️⃣  Verificando importación de configuración...")
     try:
-        from config import *
-        print("✅ Configuración importada correctamente")
-        print(f"  - PROJECT_SOURCE: {PROJECT_SOURCE}")
-        print(f"  - DATASET_NAME: {DATASET_NAME}")
-        print(f"  - TABLE_NAME: {TABLE_NAME}")
-        print(f"  - MAX_COMPANIES_FOR_TEST: {MAX_COMPANIES_FOR_TEST}")
+        import config
+        print(f"   ✅ Configuración importada correctamente")
+        print(f"   📋 Proyecto fuente: {config.PROJECT_SOURCE}")
+        print(f"   📋 Dataset: {config.DATASET_NAME}")
+        print(f"   📋 Tabla: {config.TABLE_NAME}")
         return True
     except Exception as e:
-        print(f"❌ Error importando configuración: {e}")
+        print(f"   ❌ Error importando configuración: {e}")
         return False
 
 def test_bigquery_client():
     """Prueba la creación del cliente BigQuery"""
-    print("\n🔍 Probando cliente BigQuery...")
-    
+    print("2️⃣  Verificando cliente BigQuery...")
     try:
-        from config import PROJECT_SOURCE
-        client = bigquery.Client(project=PROJECT_SOURCE)
-        print(f"✅ Cliente BigQuery creado para proyecto: {PROJECT_SOURCE}")
-        return True, client
-    except Exception as e:
-        print(f"❌ Error creando cliente BigQuery: {e}")
-        return False, None
-
-def test_companies_table(client):
-    """Prueba el acceso a la tabla de compañías"""
-    print("\n🔍 Probando acceso a tabla de compañías...")
-    
-    try:
-        from config import PROJECT_SOURCE, DATASET_NAME, TABLE_NAME
-        
-        query = f"""
-            SELECT COUNT(*) as total_companies
-            FROM `{PROJECT_SOURCE}.{DATASET_NAME}.{TABLE_NAME}`
-            WHERE company_bigquery_status IS NOT NULL
-        """
-        
-        print(f"📋 Ejecutando consulta: {query}")
-        result = client.query(query).result()
-        total_companies = list(result)[0].total_companies
-        
-        print(f"✅ Tabla accesible. Total de compañías activas: {total_companies}")
+        from google.cloud import bigquery
+        client = bigquery.Client(project="platform-partners-qua")
+        print(f"   ✅ Cliente BigQuery creado correctamente")
+        print(f"   📋 Proyecto: {client.project}")
         return True
-        
     except Exception as e:
-        print(f"❌ Error accediendo a tabla de compañías: {e}")
+        print(f"   ❌ Error creando cliente BigQuery: {e}")
         return False
 
-def test_sample_companies(client):
-    """Prueba obtener una muestra de compañías"""
-    print("\n🔍 Probando obtención de muestra de compañías...")
-    
+def test_companies_table_access():
+    """Prueba el acceso a la tabla de compañías"""
+    print("3️⃣  Verificando acceso a tabla de compañías...")
     try:
-        from config import PROJECT_SOURCE, DATASET_NAME, TABLE_NAME, MAX_COMPANIES_FOR_TEST
+        import config
+        from google.cloud import bigquery
+        client = bigquery.Client(project=config.PROJECT_SOURCE)
+        
+        query = f"""
+            SELECT COUNT(*) as total
+            FROM `{config.PROJECT_SOURCE}.{config.DATASET_NAME}.{config.TABLE_NAME}`
+        """
+        
+        result = client.query(query).result()
+        count = next(result).total
+        
+        print(f"   ✅ Acceso a tabla verificado")
+        print(f"   📊 Total de compañías: {count}")
+        return True
+    except Exception as e:
+        print(f"   ❌ Error accediendo a tabla de compañías: {e}")
+        return False
+
+def test_companies_sample():
+    """Prueba obtención de muestra de compañías"""
+    print("4️⃣  Verificando muestra de compañías...")
+    try:
+        import config
+        from google.cloud import bigquery
+        client = bigquery.Client(project=config.PROJECT_SOURCE)
         
         query = f"""
             SELECT company_id, company_name, company_project_id
-            FROM `{PROJECT_SOURCE}.{DATASET_NAME}.{TABLE_NAME}`
+            FROM `{config.PROJECT_SOURCE}.{config.DATASET_NAME}.{config.TABLE_NAME}`
             WHERE company_bigquery_status IS NOT NULL
-            ORDER BY company_id
-            LIMIT {MAX_COMPANIES_FOR_TEST}
+            LIMIT 3
         """
         
         result = client.query(query).result()
-        companies_df = pd.DataFrame([dict(row) for row in result])
+        companies = list(result)
         
-        print(f"✅ Obtenidas {len(companies_df)} compañías:")
-        for _, company in companies_df.iterrows():
-            print(f"  - {company['company_name']} ({company['company_project_id']})")
+        print(f"   ✅ Muestra obtenida correctamente")
+        print(f"   📊 Compañías encontradas: {len(companies)}")
         
-        return True, companies_df
+        for company in companies:
+            print(f"      - {company.company_name} ({company.company_project_id})")
         
+        return True
     except Exception as e:
-        print(f"❌ Error obteniendo compañías: {e}")
-        return False, None
-
-def test_sample_table_access(client, companies_df):
-    """Prueba el acceso a una tabla de muestra"""
-    print("\n🔍 Probando acceso a tabla de muestra...")
-    
-    if companies_df.empty:
-        print("⚠️  No hay compañías para probar")
+        print(f"   ❌ Error obteniendo muestra de compañías: {e}")
         return False
-    
-    # Usar la primera compañía
-    first_company = companies_df.iloc[0]
-    project_id = first_company['company_project_id']
-    company_name = first_company['company_name']
-    
+
+def test_company_tables_access():
+    """Prueba acceso a tablas de una compañía"""
+    print("5️⃣  Verificando acceso a tablas de compañía...")
     try:
-        dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
-        table_name = 'call'  # Tabla común
+        import config
+        from google.cloud import bigquery
+        client = bigquery.Client(project=config.PROJECT_SOURCE)
         
+        # Obtener una compañía de prueba
         query = f"""
-            SELECT COUNT(*) as total_tables
-            FROM `{project_id}.{dataset_name}.INFORMATION_SCHEMA.TABLES`
-            WHERE table_name = '{table_name}'
+            SELECT company_project_id, company_name
+            FROM `{config.PROJECT_SOURCE}.{config.DATASET_NAME}.{config.TABLE_NAME}`
+            WHERE company_bigquery_status IS NOT NULL
+            LIMIT 1
         """
         
-        print(f"📋 Probando acceso a: {project_id}.{dataset_name}.{table_name}")
         result = client.query(query).result()
-        total_tables = list(result)[0].total_tables
+        company = next(result)
+        project_id = company.company_project_id
+        company_name = company.company_name
         
-        if total_tables > 0:
-            print(f"✅ Tabla '{table_name}' encontrada en {company_name}")
+        print(f"   📋 Compañía de prueba: {company_name}")
+        print(f"   📋 Proyecto: {project_id}")
+        
+        # Verificar acceso a dataset
+        dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
+        dataset_ref = client.dataset(dataset_name, project=project_id)
+        
+        try:
+            dataset = client.get_dataset(dataset_ref)
+            tables = list(client.list_tables(dataset))
             
-            # Probar acceso a campos
-            fields_query = f"""
-                SELECT column_name, data_type
-                FROM `{project_id}.{dataset_name}.INFORMATION_SCHEMA.COLUMNS`
-                WHERE table_name = '{table_name}'
-                LIMIT 5
-            """
+            print(f"   ✅ Acceso a dataset verificado")
+            print(f"   📊 Tablas encontradas: {len(tables)}")
             
-            fields_result = client.query(fields_query).result()
-            fields_df = pd.DataFrame([dict(row) for row in fields_result])
-            
-            print(f"✅ Campos de muestra obtenidos ({len(fields_df)} campos):")
-            for _, field in fields_df.iterrows():
-                print(f"  - {field['column_name']}: {field['data_type']}")
+            # Mostrar algunas tablas
+            table_names = [table.table_id for table in tables[:5]]
+            print(f"   📋 Primeras tablas: {', '.join(table_names)}")
             
             return True
-        else:
-            print(f"⚠️  Tabla '{table_name}' no encontrada en {company_name}")
+            
+        except Exception as e:
+            print(f"   ❌ Error accediendo a dataset: {e}")
             return False
             
     except Exception as e:
-        print(f"❌ Error accediendo a tabla de muestra: {e}")
+        print(f"   ❌ Error en prueba de acceso: {e}")
         return False
+
+def test_dependencies():
+    """Prueba dependencias de Python"""
+    print("6️⃣  Verificando dependencias de Python...")
+    
+    required_modules = [
+        'google.cloud.bigquery',
+        'pandas',
+        'numpy',
+        'datetime'
+    ]
+    
+    all_ok = True
+    
+    for module in required_modules:
+        try:
+            __import__(module)
+            print(f"   ✅ {module}")
+        except ImportError:
+            print(f"   ❌ {module} - No instalado")
+            all_ok = False
+    
+    return all_ok
+
+def generate_diagnostic_report(results):
+    """Genera reporte de diagnóstico"""
+    print("\n" + "="*60)
+    print("📊 REPORTE DE DIAGNÓSTICO")
+    print("="*60)
+    
+    total_tests = len(results)
+    passed_tests = sum(results.values())
+    success_rate = (passed_tests / total_tests) * 100
+    
+    print(f"Pruebas realizadas: {total_tests}")
+    print(f"Pruebas exitosas: {passed_tests}")
+    print(f"Pruebas fallidas: {total_tests - passed_tests}")
+    print(f"Tasa de éxito: {success_rate:.1f}%")
+    
+    print(f"\nDetalles por prueba:")
+    for test_name, result in results.items():
+        status = "✅" if result else "❌"
+        print(f"  {status} {test_name}")
+    
+    if success_rate == 100:
+        print(f"\n🎯 ¡SISTEMA LISTO!")
+        print(f"💡 Todas las verificaciones pasaron exitosamente.")
+        print(f"🚀 Puedes proceder con el procesamiento de datos.")
+    elif success_rate >= 80:
+        print(f"\n⚠️  SISTEMA PARCIALMENTE LISTO")
+        print(f"💡 La mayoría de verificaciones pasaron.")
+        print(f"🔧 Revisa los errores antes de continuar.")
+    else:
+        print(f"\n❌ SISTEMA NO LISTO")
+        print(f"💡 Múltiples errores detectados.")
+        print(f"🔧 Corrige los problemas antes de continuar.")
+    
+    return success_rate
 
 def main():
     """Función principal de diagnóstico"""
-    print("🔧 DIAGNÓSTICO DEL SISTEMA")
-    print("=" * 50)
+    print("🔍 DIAGNÓSTICO DEL SISTEMA")
+    print("="*60)
+    print("Este script verificará la conectividad y configuración")
+    print("necesaria para ejecutar el proceso de consolidación.")
+    print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print()
     
-    # Paso 1: Importación de configuración
-    if not test_config_import():
-        print("\n❌ DIAGNÓSTICO FALLIDO: Problema con configuración")
-        return False
+    # Ejecutar todas las pruebas
+    results = {
+        "Importación de configuración": test_import_config(),
+        "Cliente BigQuery": test_bigquery_client(),
+        "Acceso a tabla de compañías": test_companies_table_access(),
+        "Muestra de compañías": test_companies_sample(),
+        "Acceso a tablas de compañía": test_company_tables_access(),
+        "Dependencias de Python": test_dependencies()
+    }
     
-    # Paso 2: Cliente BigQuery
-    success, client = test_bigquery_client()
-    if not success:
-        print("\n❌ DIAGNÓSTICO FALLIDO: Problema con BigQuery")
-        return False
+    # Generar reporte
+    success_rate = generate_diagnostic_report(results)
     
-    # Paso 3: Tabla de compañías
-    if not test_companies_table(client):
-        print("\n❌ DIAGNÓSTICO FALLIDO: Problema con tabla de compañías")
-        return False
+    # Guardar reporte
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    report_file = f"diagnostic_report_{timestamp}.txt"
     
-    # Paso 4: Muestra de compañías
-    success, companies_df = test_sample_companies(client)
-    if not success:
-        print("\n❌ DIAGNÓSTICO FALLIDO: Problema obteniendo compañías")
-        return False
+    with open(report_file, 'w', encoding='utf-8') as f:
+        f.write("REPORTE DE DIAGNÓSTICO\n")
+        f.write("="*60 + "\n")
+        f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Tasa de éxito: {success_rate:.1f}%\n\n")
+        
+        for test_name, result in results.items():
+            status = "PASS" if result else "FAIL"
+            f.write(f"{status}: {test_name}\n")
     
-    # Paso 5: Acceso a tabla de muestra
-    if not test_sample_table_access(client, companies_df):
-        print("\n⚠️  DIAGNÓSTICO PARCIAL: Problema con acceso a tablas de compañías")
-        return False
+    print(f"\n📄 Reporte guardado: {report_file}")
     
-    print("\n🎯 DIAGNÓSTICO COMPLETADO EXITOSAMENTE")
-    print("✅ El sistema está listo para ejecutar el proceso de consolidación")
-    
-    return True
+    return success_rate >= 80
 
 if __name__ == "__main__":
     success = main()

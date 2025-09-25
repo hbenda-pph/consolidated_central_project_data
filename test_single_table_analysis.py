@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Test Single Table Analysis
+Test Single Table Analysis - Consolidated Central Project Data
 
 Script de prueba para analizar una sola tabla y generar su vista Silver.
 Útil para probar la lógica antes de ejecutar el script completo.
@@ -17,21 +17,21 @@ warnings.filterwarnings('ignore')
 PROJECT_SOURCE = "platform-partners-qua"
 DATASET_NAME = "settings"
 TABLE_NAME = "companies"
-TEST_TABLE = "call"  # Cambiar por la tabla que quieras probar
+TEST_TABLE = "call"  # Tabla de prueba
+MAX_COMPANIES_FOR_TEST = 5
 
-print(f"🧪 PRUEBA DE ANÁLISIS PARA TABLA: {TEST_TABLE}")
-print("=" * 60)
-
-# Crear cliente
+# Crear cliente BigQuery
 client = bigquery.Client(project=PROJECT_SOURCE)
+print(f"✅ Cliente BigQuery creado para proyecto: {PROJECT_SOURCE}")
 
 def get_companies_info():
+    """Obtiene información de las compañías activas"""
     query = f"""
         SELECT company_id, company_name, company_project_id
         FROM `{PROJECT_SOURCE}.{DATASET_NAME}.{TABLE_NAME}`
         WHERE company_bigquery_status IS NOT NULL
         ORDER BY company_id
-        LIMIT 5  -- Solo las primeras 5 para prueba
+        LIMIT {MAX_COMPANIES_FOR_TEST}  # Solo las primeras 5 para prueba
     """
     return pd.DataFrame([dict(row) for row in client.query(query).result()])
 
@@ -85,19 +85,24 @@ if not results:
     print(f"❌ No se encontraron datos para la tabla '{TEST_TABLE}'")
     exit()
 
-# Determinar campos comunes
-from collections import Counter
+# Analizar campos comunes y únicos
 field_frequency = Counter()
 for result in results:
     field_frequency.update(result['fields'])
 
 total_companies = len(results)
-common_fields = [field for field, count in field_frequency.items() if count == total_companies]
-partial_fields = [field for field, count in field_frequency.items() if count < total_companies]
+common_fields = []
+partial_fields = []
 
-print(f"\n📊 ANÁLISIS DE CAMPOS:")
-print(f"  Total compañías: {total_companies}")
-print(f"  Campos únicos: {len(all_fields)}")
+for field, count in field_frequency.items():
+    if count == total_companies:
+        common_fields.append(field)
+    else:
+        partial_fields.append(field)
+
+print(f"\n📊 ANÁLISIS DE CAMPOS PARA '{TEST_TABLE}':")
+print(f"  Total de compañías: {total_companies}")
+print(f"  Total de campos únicos: {len(all_fields)}")
 print(f"  Campos comunes: {len(common_fields)}")
 print(f"  Campos parciales: {len(partial_fields)}")
 
@@ -163,33 +168,39 @@ if results:
     first_company = results[0]
     company_fields = set(first_company['fields'])
     
-    print(f"\n🔧 SQL DE EJEMPLO PARA: {first_company['company_name']}")
-    print("=" * 60)
-    
+    # Generar SQL
     sql_fields = []
     
     # Campos comunes
     for field in sorted(common_fields):
         sql_fields.append(f"    {field}")
     
-    # Campos parciales
+    # Campos parciales con COALESCE
     for field in sorted(partial_fields):
         if field in company_fields:
             sql_fields.append(f"    {field}")
         else:
-            sql_fields.append(f"    COALESCE(NULL, '') as {field}")
+            sql_fields.append(f"    NULL as {field}")
     
-    # Metadata
-    sql_fields.extend([
-        f"    '{first_company['project_id']}' as source_project",
-        f"    CURRENT_TIMESTAMP() as silver_processed_at"
-    ])
+    # Metadata fields
+    sql_fields.append(f"    '{first_company['project_id']}' as source_project")
+    sql_fields.append(f"    CURRENT_TIMESTAMP() as silver_processed_at")
+    sql_fields.append(f"    '{first_company['company_name']}' as company_name")
     
-    sql = f"""CREATE OR REPLACE VIEW `{first_company['project_id']}.silver.vw_normalized_{TEST_TABLE}` AS (
+    # Crear SQL
+    project_id = first_company['project_id']
+    company_name = first_company['company_name']
+    dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
+    
+    sql = f"""-- Vista Silver para {company_name} - Tabla {TEST_TABLE}
+-- Generada automáticamente el {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+CREATE OR REPLACE VIEW `{project_id}.silver.vw_normalized_{TEST_TABLE}` AS (
 SELECT
 {chr(10).join(sql_fields)}
-FROM `{first_company['project_id']}.servicetitan_{first_company['project_id'].replace('-', '_')}.{TEST_TABLE}`
-);"""
+FROM `{project_id}.{dataset_name}.{TEST_TABLE}`
+);
+"""
     
     print(sql)
     
