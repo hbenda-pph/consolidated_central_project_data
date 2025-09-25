@@ -14,7 +14,7 @@ de vistas Silver y consolidadas.
 PROJECT_SOURCE = "platform-partners-qua"
 
 # Proyecto central donde se crearán las vistas consolidadas
-CENTRAL_PROJECT = "platform-partners-des"
+CENTRAL_PROJECT = "pph-central"
 
 # Dataset y tabla de configuración de compañías
 DATASET_NAME = "settings"
@@ -53,7 +53,7 @@ TABLES_TO_PROCESS = [
 # =============================================================================
 
 # Prefijo para vistas Silver normalizadas
-SILVER_VIEW_PREFIX = "vw_normalized_"
+SILVER_VIEW_PREFIX = "vw_"
 
 # Prefijo para vistas consolidadas centrales
 CONSOLIDATED_VIEW_PREFIX = "vw_consolidated_"

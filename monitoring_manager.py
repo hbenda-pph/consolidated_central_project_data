@@ -185,7 +185,7 @@ class MonitoringManager:
             company_name = company['company_name']
             
             if table_name:
-                view_name = f"vw_normalized_{table_name}"
+                view_name = f"vw_{table_name}"
                 result = self.validate_silver_view(project_id, view_name, expected_fields)
                 result['company_name'] = company_name
                 result['table_name'] = table_name

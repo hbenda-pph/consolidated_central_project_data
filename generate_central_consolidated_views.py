@@ -52,16 +52,16 @@ def generate_consolidated_view_sql(table_name, companies_df):
         company_name = company['company_name']
         
         # Verificar que la vista Silver existe (esto sería ideal validar)
-        silver_view = f"`{project_id}.silver.vw_normalized_{table_name}`"
+        silver_view = f"`{project_id}.silver.vw_{table_name}`"
         
-        union_parts.append(f"SELECT * FROM {silver_view}")
+        union_parts.append(f"SELECT *, '{project_id}' AS company_project_id, {company['company_id']} AS company_id FROM {silver_view}")
     
     # Crear SQL completo
     sql = f"""-- Vista Consolidada para tabla: {table_name}
 -- Generada automáticamente el {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 -- Consolida datos de {len(companies_df)} compañías
 
-CREATE OR REPLACE VIEW `{CENTRAL_PROJECT}.silver.vw_consolidated_{table_name}` AS (
+CREATE OR REPLACE VIEW `{CENTRAL_PROJECT}.central-silver.vw_consolidated_{table_name}` AS (
 {chr(10).join([f"  {part}" if i == 0 else f"  UNION ALL{chr(10)}  {part}" for i, part in enumerate(union_parts)])}
 );
 
@@ -160,7 +160,7 @@ def generate_all_consolidated_views():
         
         f.write(f"## Estructura de las Vistas\n\n")
         f.write(f"Cada vista consolidada:\n")
-        f.write(f"- Se crea en: `{CENTRAL_PROJECT}.silver.vw_consolidated_{{table_name}}`\n")
+        f.write(f"- Se crea en: `{CENTRAL_PROJECT}.central-silver.vw_consolidated_{{table_name}}`\n")
         f.write(f"- Consolida datos de {len(companies_df)} compañías\n")
         f.write(f"- Incluye campos normalizados y metadata\n")
         f.write(f"- Usa UNION ALL para máxima performance\n")

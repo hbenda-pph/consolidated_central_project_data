@@ -95,7 +95,7 @@ class RollbackManager:
             op for op in operations 
             if (op['type'] == 'VIEW_CREATION' and 
                 op['status'] == 'SUCCESS' and
-                'vw_normalized_' in op['details'].get('view_name', ''))
+                'vw_' in op['details'].get('view_name', ''))
         ]
         
         if not silver_operations:

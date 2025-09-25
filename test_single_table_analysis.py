@@ -195,7 +195,7 @@ if results:
     sql = f"""-- Vista Silver para {company_name} - Tabla {TEST_TABLE}
 -- Generada automáticamente el {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
-CREATE OR REPLACE VIEW `{project_id}.silver.vw_normalized_{TEST_TABLE}` AS (
+CREATE OR REPLACE VIEW `{project_id}.silver.vw_{TEST_TABLE}` AS (
 SELECT
 {chr(10).join(sql_fields)}
 FROM `{project_id}.{dataset_name}.{TEST_TABLE}`

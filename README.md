@@ -96,11 +96,12 @@ python consolidation_status_manager.py reset
 ## 📋 Resultados
 
 ### Vistas Silver (por compañía)
-- Ubicación: `{project_id}.silver.vw_normalized_{table_name}`
+- Ubicación: `{project_id}.silver.vw_{table_name}`
 - Normalización de campos y tipos de datos
 - Filtro automático de campos `_fivetran`
 
 ### Vistas Consolidadas (central)
 - Ubicación: `{central_project}.central-silver.vw_consolidated_{table_name}`
 - UNION ALL de todas las vistas Silver
+- Incluye campos `company_project_id` y `company_id`
 - Solo incluye compañías con estado COMPLETED
