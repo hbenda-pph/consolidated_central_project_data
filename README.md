@@ -14,12 +14,11 @@ Scripts para generar vistas Silver normalizadas y consolidadas para todas las ta
 
 ## 📁 Archivos Principales
 
+- `cloud_shell_runner.py` - Script principal con gestión completa
 - `generate_silver_views.py` - Genera vistas Silver con seguimiento de estados
 - `generate_central_consolidated_views.py` - Genera vistas consolidadas centrales
-- `analyze_data_types.py` - Análisis de conflictos de tipos de datos
 - `consolidation_status_manager.py` - Gestión de estados de consolidación
 - `config.py` - Configuración centralizada
-- `requirements.txt` - Dependencias de Python
 
 ## 🚀 Uso en Cloud Shell
 
@@ -48,17 +47,20 @@ TABLE_NAME = "companies"
 
 ### 3. Comandos Principales
 ```bash
-# Análisis de tipos de datos
-python analyze_data_types.py
+# Configuración inicial
+python cloud_shell_setup.py
 
-# Generar vistas Silver
-python generate_silver_views.py
+# Proceso completo con gestión robusta
+python cloud_shell_runner.py all
 
-# Generar vistas consolidadas
-python generate_central_consolidated_views.py
+# Solo análisis de prueba
+python cloud_shell_runner.py test
 
-# Gestión de estados
-python consolidation_status_manager.py summary
+# Solo generar vistas Silver
+python cloud_shell_runner.py silver
+
+# Validar vistas creadas
+python cloud_shell_runner.py validate
 ```
 
 ### 4. Gestión de Estados
