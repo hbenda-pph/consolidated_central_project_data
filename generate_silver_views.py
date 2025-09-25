@@ -22,6 +22,7 @@ warnings.filterwarnings('ignore')
 # Importar configuración centralizada
 from config import *
 from consolidation_status_manager import ConsolidationStatusManager
+from consolidation_tracking_manager import ConsolidationTrackingManager
 
 # print(f"🔧 Configuración:")
 # print(f"   Proyecto: {PROJECT_SOURCE}")
@@ -49,7 +50,8 @@ def get_companies_info():
             company_bigquery_status,
             company_consolidated_status
         FROM `{PROJECT_SOURCE}.{DATASET_NAME}.{TABLE_NAME}`
-        WHERE company_bigquery_status = TRUE
+        WHERE company_fivetran_status = TRUE
+          AND company_bigquery_status = TRUE
         ORDER BY company_id
     """
 
@@ -423,50 +425,15 @@ def get_default_value_for_type(data_type):
     }
     return defaults.get(data_type, 'NULL')
 
-def generate_summary_csv(summary_matrix, output_dir):
-    """
-    Genera un archivo CSV con el resumen de estados de creación de vistas
-    """
-    import csv
-    
-    if not summary_matrix:
-        return
-    
-    # Obtener todas las tablas únicas
-    all_tables = set()
-    for company_data in summary_matrix.values():
-        all_tables.update(company_data.keys())
-    all_tables = sorted(list(all_tables))
-    
-    # Crear archivo CSV
-    csv_filename = f"{output_dir}/summary_matrix.csv"
-    
-    with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.writer(csvfile)
-        
-        # Escribir encabezados
-        headers = ['Company'] + all_tables
-        writer.writerow(headers)
-        
-        # Escribir datos
-        for company_name, table_data in sorted(summary_matrix.items()):
-            row = [company_name]
-            for table in all_tables:
-                status = table_data.get(table, 0)  # 0 por defecto si no existe
-                row.append(status)
-            writer.writerow(row)
-    
-    print(f"📊 Matriz de resumen generada: {csv_filename}")
-    print(f"   Estados: 0=Tabla no existe, 1=Éxito, 2=Error")
-
 def generate_all_silver_views():
     """
     Genera vistas Silver para todas las tablas identificadas con seguimiento de estados
     """
     print("🚀 Iniciando generación de vistas Silver para todas las tablas")
     
-    # Inicializar gestor de estados
+    # Inicializar gestores
     status_manager = ConsolidationStatusManager()
+    tracking_manager = ConsolidationTrackingManager()
     
     # Obtener compañías pendientes de consolidación
     pending_companies = status_manager.get_companies_for_consolidation()
@@ -475,13 +442,11 @@ def generate_all_silver_views():
         print("ℹ️  No hay compañías pendientes de consolidación")
         return {}, {}
     
-    # Inicializar matriz de resumen
-    summary_matrix = {}
-    
     print(f"📋 Compañías a procesar: {len(pending_companies)}")
     
-    # Usar configuración centralizada
-    tables_to_process = TABLES_TO_PROCESS
+    # Usar configuración centralizada y filtrar tablas ya consolidadas
+    all_tables = TABLES_TO_PROCESS
+    tables_to_process = tracking_manager.get_tables_to_process(all_tables)
     
     all_results = {}
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -490,12 +455,9 @@ def generate_all_silver_views():
     output_dir = f"{OUTPUT_BASE_DIR}/silver_views_{timestamp}"
     os.makedirs(output_dir, exist_ok=True)
     
-    # Inicializar matriz de resumen
-    for _, company in pending_companies.iterrows():
-        company_name = company['company_name']
-        summary_matrix[company_name] = {}
-        for table_name in tables_to_process:
-            summary_matrix[company_name][table_name] = 0  # Estado inicial
+    if not tables_to_process:
+        print("✅ Todas las tablas están 100% consolidadas. No hay nada que procesar.")
+        return {}, {}
     
     print(f"🚀 INICIANDO GENERACIÓN DE VISTAS SILVER")
     print(f"📁 Directorio de salida: {output_dir}")
@@ -510,9 +472,31 @@ def generate_all_silver_views():
         
         if table_analysis is None:
             print(f"  ⏭️  Saltando tabla '{table_name}' - no se encontraron datos")
+            # Registrar estado 0 para todas las compañías (tabla no existe)
+            for _, company in pending_companies.iterrows():
+                tracking_manager.update_status(
+                    company_id=company['company_id'],
+                    table_name=table_name,
+                    status=0,
+                    notes="Tabla no existe en esta compañía"
+                )
             continue
         
         all_results[table_name] = table_analysis
+        
+        # Obtener compañías que tienen la tabla
+        companies_with_table = {result['company_name'] for result in table_analysis['company_results']}
+        
+        # Registrar estado 0 para compañías que no tienen la tabla
+        for _, company in pending_companies.iterrows():
+            company_name = company['company_name']
+            if company_name not in companies_with_table:
+                tracking_manager.update_status(
+                    company_id=company['company_id'],
+                    table_name=table_name,
+                    status=0,
+                    notes="Tabla no existe en esta compañía"
+                )
         
         # Generar vistas Silver para cada compañía
         company_sql_files = []
@@ -531,11 +515,28 @@ def generate_all_silver_views():
                 query_job.result()  # Esperar a que termine
                 print(f"    ✅ Vista creada: {company_name}")
                 company_sql_files.append(f"SUCCESS: {company_name}")
-                summary_matrix[company_name][table_name] = 1  # Éxito
+                
+                # Actualizar tracking
+                tracking_manager.update_status(
+                    company_id=company_result['company_id'],
+                    table_name=table_name,
+                    status=1,
+                    notes=f"Vista creada exitosamente en {project_id}.silver"
+                )
+                
             except Exception as e:
-                print(f"    ❌ Error creando vista {company_name}: {str(e)}")
+                error_msg = str(e)
+                print(f"    ❌ Error creando vista {company_name}: {error_msg}")
                 company_sql_files.append(f"ERROR: {company_name}")
-                summary_matrix[company_name][table_name] = 2  # Error
+                
+                # Actualizar tracking con error
+                tracking_manager.update_status(
+                    company_id=company_result['company_id'],
+                    table_name=table_name,
+                    status=2,
+                    error_message=error_msg,
+                    notes=f"Error al crear vista en {project_id}.silver"
+                )
         
         # Crear archivo consolidado para la tabla
         consolidated_filename = f"{output_dir}/consolidated_{table_name}_analysis.sql"
@@ -618,14 +619,14 @@ def generate_all_silver_views():
     # Mostrar resumen de estados
     status_manager.print_consolidation_summary()
     
-    # Generar archivo CSV de resumen
-    generate_summary_csv(summary_matrix, output_dir)
+    # Mostrar reporte de consolidación
+    tracking_manager.print_consolidation_report()
     
     print(f"\n🎯 GENERACIÓN COMPLETADA")
     print(f"📁 Directorio: {output_dir}")
     print(f"📊 Tablas procesadas: {len(all_results)}")
     print(f"📄 Resumen: {summary_filename}")
-    print(f"📊 Matriz CSV: {output_dir}/summary_matrix.csv")
+    print(f"📊 Tracking: Tabla companies_consolidated actualizada")
     
     return all_results, output_dir
 
