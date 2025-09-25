@@ -49,7 +49,7 @@ def get_companies_info():
             company_bigquery_status,
             company_consolidated_status
         FROM `{PROJECT_SOURCE}.{DATASET_NAME}.{TABLE_NAME}`
-        WHERE company_bigquery_status IS NOT NULL
+        WHERE company_bigquery_status = TRUE
         ORDER BY company_id
     """
 
@@ -395,8 +395,10 @@ def generate_cast_for_field(field_name, source_type, target_type):
         ('DATE', 'STRING'): f"CAST({field_name} AS STRING)",
         ('DATETIME', 'STRING'): f"CAST({field_name} AS STRING)",
         ('TIMESTAMP', 'STRING'): f"CAST({field_name} AS STRING)",
-        # JSON a STRING - usar SAFE_CAST con valor por defecto
-        ('JSON', 'STRING'): f"COALESCE(SAFE_CAST({field_name} AS STRING), '')"
+        # JSON a otros tipos - usar TO_JSON_STRING para convertir a STRING
+        ('JSON', 'STRING'): f"COALESCE(TO_JSON_STRING({field_name}), '')",
+        ('JSON', 'INT64'): f"COALESCE(SAFE_CAST(TO_JSON_STRING({field_name}) AS INT64), 0)",
+        ('JSON', 'FLOAT64'): f"COALESCE(SAFE_CAST(TO_JSON_STRING({field_name}) AS FLOAT64), 0.0)"
     }
     
     cast_key = (source_type, target_type)
