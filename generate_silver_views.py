@@ -17,21 +17,21 @@ from collections import defaultdict, Counter
 import os
 warnings.filterwarnings('ignore')
 
-print("✅ Librerías importadas correctamente")
+# print("✅ Librerías importadas correctamente")
 
 # Importar configuración centralizada
 from config import *
 from consolidation_status_manager import ConsolidationStatusManager
 
-print(f"🔧 Configuración:")
-print(f"   Proyecto: {PROJECT_SOURCE}")
-print(f"   Dataset: {DATASET_NAME}")
-print(f"   Tabla: {TABLE_NAME}")
+# print(f"🔧 Configuración:")
+# print(f"   Proyecto: {PROJECT_SOURCE}")
+# print(f"   Dataset: {DATASET_NAME}")
+# print(f"   Tabla: {TABLE_NAME}")
 
 # Crear cliente de BigQuery
 try:
     client = bigquery.Client(project=PROJECT_SOURCE)
-    print(f"✅ Cliente BigQuery creado exitosamente para proyecto: {PROJECT_SOURCE}")
+    # print(f"✅ Cliente BigQuery creado exitosamente para proyecto: {PROJECT_SOURCE}")
 except Exception as e:
     print(f"❌ Error al crear cliente BigQuery: {str(e)}")
     raise
@@ -57,7 +57,7 @@ def get_companies_info():
         query_job = client.query(query)
         results = query_job.result()
         companies_df = pd.DataFrame([dict(row) for row in results])
-        print(f"✅ Información de compañías obtenida: {len(companies_df)} registros")
+        # print(f"✅ Información de compañías obtenida: {len(companies_df)} registros")
         return companies_df
     except Exception as e:
         print(f"❌ Error al obtener información de compañías: {str(e)}")
@@ -123,7 +123,7 @@ def analyze_table_fields_across_companies(table_name):
         fields_list = filtered_fields_df['column_name'].tolist()
         field_count = len(fields_list)
         
-        print(f"  ✅ {company_name}: {field_count} campos (filtrados _fivetran)")
+        # print(f"  ✅ {company_name}: {field_count} campos (filtrados _fivetran)")
         
         # Guardar información
         table_analysis_results.append({
@@ -170,9 +170,9 @@ def analyze_table_fields_across_companies(table_name):
     print(f"  Campos con conflicto de tipo: {len(type_conflicts)}")
     
     if common_fields:
-        print(f"\n✅ CAMPOS COMUNES:")
-        for field in common_fields:
-            print(f"    - {field}")
+        # print(f"\n✅ CAMPOS COMUNES:")
+        # for field in common_fields:
+        #     print(f"    - {field}")
     
     if partial_fields:
         print(f"\n⚠️  CAMPOS PARCIALES:")
@@ -407,7 +407,7 @@ def generate_all_silver_views():
     """
     Genera vistas Silver para todas las tablas identificadas con seguimiento de estados
     """
-    print("🚀 Iniciando generación de vistas Silver para todas las tablas")
+    # print("🚀 Iniciando generación de vistas Silver para todas las tablas")
     
     # Inicializar gestor de estados
     status_manager = ConsolidationStatusManager()
@@ -419,7 +419,7 @@ def generate_all_silver_views():
         print("ℹ️  No hay compañías pendientes de consolidación")
         return {}, {}
     
-    print(f"📋 Compañías a procesar: {len(pending_companies)}")
+    # print(f"📋 Compañías a procesar: {len(pending_companies)}")
     
     # Usar configuración centralizada
     tables_to_process = TABLES_TO_PROCESS
@@ -431,10 +431,10 @@ def generate_all_silver_views():
     output_dir = f"{OUTPUT_BASE_DIR}/silver_views_{timestamp}"
     os.makedirs(output_dir, exist_ok=True)
     
-    print(f"🚀 INICIANDO GENERACIÓN DE VISTAS SILVER")
-    print(f"📁 Directorio de salida: {output_dir}")
-    print(f"📋 Tablas a procesar: {len(tables_to_process)}")
-    print("=" * 80)
+    # print(f"🚀 INICIANDO GENERACIÓN DE VISTAS SILVER")
+    # print(f"📁 Directorio de salida: {output_dir}")
+    # print(f"📋 Tablas a procesar: {len(tables_to_process)}")
+    # print("=" * 80)
     
     for table_name in tables_to_process:
         print(f"\n🔄 Procesando tabla: {table_name}")
@@ -460,10 +460,10 @@ def generate_all_silver_views():
             
             # Ejecutar vista directamente en BigQuery
             try:
-                print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
+                # print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
                 query_job = client.query(sql_content)
                 query_job.result()  # Esperar a que termine
-                print(f"    ✅ Vista creada: {company_name}")
+                # print(f"    ✅ Vista creada: {company_name}")
                 company_sql_files.append(f"SUCCESS: {company_name}")
             except Exception as e:
                 print(f"    ❌ Error creando vista {company_name}: {str(e)}")
@@ -542,7 +542,7 @@ def generate_all_silver_views():
         # Actualizar estado
         if company_success:
             status_manager.update_company_status(company_id, status_manager.STATUS['COMPLETED'])
-            print(f"  ✅ {company_name}: Estado actualizado a COMPLETED")
+            # print(f"  ✅ {company_name}: Estado actualizado a COMPLETED")
         else:
             status_manager.update_company_status(company_id, status_manager.STATUS['ERROR'])
             print(f"  ❌ {company_name}: Estado actualizado a ERROR")
@@ -561,5 +561,5 @@ if __name__ == "__main__":
     # Ejecutar generación
     results, output_dir = generate_all_silver_views()
     
-    print(f"\n✅ Script completado exitosamente!")
-    print(f"📁 Revisa los archivos en: {output_dir}")
+    # print(f"\n✅ Script completado exitosamente!")
+    # print(f"📁 Revisa los archivos en: {output_dir}")
