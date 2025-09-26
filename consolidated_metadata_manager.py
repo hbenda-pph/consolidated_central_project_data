@@ -5,14 +5,14 @@ Maneja la configuración de particionado y clusterizado
 
 from google.cloud import bigquery
 import pandas as pd
-from config import PROJECT_SOURCE
+from config import PROJECT_SOURCE, PROJECT_CENTRAL
 
 class ConsolidatedMetadataManager:
     """Maneja metadatos de tablas consolidadas"""
     
     def __init__(self):
-        self.client = bigquery.Client(project=PROJECT_SOURCE)
-        self.metadata_table = f"{PROJECT_SOURCE}.management.metadata_consolidated_tables"
+        self.client = bigquery.Client(project=PROJECT_CENTRAL)
+        self.metadata_table = f"{PROJECT_CENTRAL}.management.metadata_consolidated_tables"
     
     def get_table_metadata(self, table_name):
         """

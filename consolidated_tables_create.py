@@ -6,7 +6,7 @@ Con particionado y clusterizado basado en metadatos
 from google.cloud import bigquery
 import pandas as pd
 from datetime import datetime
-from config import PROJECT_SOURCE, TABLES_TO_PROCESS
+from config import PROJECT_SOURCE, PROJECT_CENTRAL, TABLES_TO_PROCESS
 from consolidated_metadata_manager import ConsolidatedMetadataManager
 from consolidation_tracking_manager import ConsolidationTrackingManager
 
@@ -14,10 +14,10 @@ class ConsolidatedTableCreator:
     """Creador de tablas consolidadas optimizadas"""
     
     def __init__(self):
-        self.client = bigquery.Client(project=PROJECT_SOURCE)
+        self.client = bigquery.Client(project=PROJECT_CENTRAL)
         self.metadata_manager = ConsolidatedMetadataManager()
         self.tracking_manager = ConsolidationTrackingManager()
-        self.central_bronze_dataset = f"{PROJECT_SOURCE}.central-bronze"
+        self.central_bronze_dataset = f"{PROJECT_CENTRAL}.central-bronze"
     
     def get_companies_with_silver_views(self, table_name):
         """

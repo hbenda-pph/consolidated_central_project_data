@@ -6,7 +6,7 @@ Permite configurar particionado y clusterizado por tabla
 from google.cloud import bigquery
 import pandas as pd
 from datetime import datetime
-from config import PROJECT_SOURCE, TABLES_TO_PROCESS
+from config import PROJECT_SOURCE, PROJECT_CENTRAL, TABLES_TO_PROCESS
 from consolidated_metadata_manager import ConsolidatedMetadataManager
 
 class MetadataUpdater:

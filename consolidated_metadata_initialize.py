@@ -6,15 +6,15 @@ Usa la información de all_unique_tables para poblar la tabla inicialmente
 from google.cloud import bigquery
 import pandas as pd
 from datetime import datetime
-from config import PROJECT_SOURCE, TABLES_TO_PROCESS
+from config import PROJECT_SOURCE, PROJECT_CENTRAL, TABLES_TO_PROCESS
 from consolidated_metadata_manager import ConsolidatedMetadataManager
 
 class MetadataInitializer:
     """Inicializador de tabla de metadatos"""
     
     def __init__(self):
-        self.client = bigquery.Client(project=PROJECT_SOURCE)
-        self.metadata_manager = ConsolidatedMetadataManager()
+        self.client = bigquery.Client(project=PROJECT_SOURCE)  # Para leer companies
+        self.metadata_manager = ConsolidatedMetadataManager()  # Usa PROJECT_CENTRAL internamente
     
     def get_all_unique_tables(self):
         """

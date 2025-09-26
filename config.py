@@ -13,8 +13,8 @@ de vistas Silver y consolidadas.
 # Proyecto fuente donde están los datos de las compañías
 PROJECT_SOURCE = "platform-partners-des"
 
-# Proyecto central donde se crearán las vistas consolidadas
-CENTRAL_PROJECT = "pph-central"
+# Proyecto central donde se crearán las vistas consolidadas y metadatos
+PROJECT_CENTRAL = "pph-central"
 
 # Dataset y tabla de configuración de compañías
 DATASET_NAME = "settings"
