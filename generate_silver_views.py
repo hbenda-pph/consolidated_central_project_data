@@ -299,7 +299,7 @@ def generate_silver_view_sql(table_analysis, company_result):
 
 CREATE OR REPLACE VIEW `{project_id}.silver.{view_name}` AS (
 SELECT
-{chr(10).join(fields_with_commas)}
+{'\n'.join(fields_with_commas)}
 FROM `{project_id}.{dataset_name}.{table_name}`
 );
 """
@@ -478,6 +478,18 @@ def generate_all_silver_views():
     for table_name in tables_to_process:
         print(f"\n🔄 Procesando tabla: {table_name}")
         
+        # Verificar si la tabla ya está 100% consolidada
+        completion_status = tracking_manager.get_table_completion_status(table_name)
+        
+        if completion_status['is_fully_consolidated']:
+            print(f"  ⏭️  Saltando tabla '{table_name}' - 100% consolidada ({completion_status['completion_rate']:.1f}%)")
+            continue
+        
+        print(f"  📊 Estado actual: {completion_status['completion_rate']:.1f}% completada")
+        print(f"     ✅ Éxitos: {completion_status['success_count']}")
+        print(f"     ❌ Errores: {completion_status['error_count']}")
+        print(f"     ⚠️  No existe: {completion_status['missing_count']}")
+        
         # Analizar campos de la tabla
         table_analysis = analyze_table_fields_across_companies(table_name)
         
@@ -647,9 +659,27 @@ def generate_all_silver_views():
     # Mostrar reporte de consolidación
     tracking_manager.print_consolidation_report()
     
+    # Mostrar resumen de tablas saltadas
+    print(f"\n📋 RESUMEN DE TABLAS:")
+    print("=" * 50)
+    
+    processed_count = 0
+    skipped_count = 0
+    
+    for table_name in all_tables:
+        completion_status = tracking_manager.get_table_completion_status(table_name)
+        
+        if completion_status['is_fully_consolidated']:
+            skipped_count += 1
+            print(f"  ⏭️  {table_name}: SALTADA - 100% consolidada")
+        else:
+            processed_count += 1
+            print(f"  🔄 {table_name}: PROCESADA - {completion_status['completion_rate']:.1f}% completada")
+    
     print(f"\n🎯 GENERACIÓN COMPLETADA")
     print(f"📁 Directorio: {output_dir}")
-    print(f"📊 Tablas procesadas: {len(all_results)}")
+    print(f"📊 Tablas procesadas: {processed_count}")
+    print(f"⏭️  Tablas saltadas: {skipped_count}")
     print(f"📄 Resumen: {summary_filename}")
     print(f"📊 Tracking: Tabla companies_consolidated actualizada")
     
