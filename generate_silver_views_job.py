@@ -127,7 +127,7 @@ def execute_job_only():
     """
     print("🚀 Ejecutando Cloud Run Job existente")
     
-    PROJECT_ID = "pph-central"
+    PROJECT_ID = "platform-partners-des"
     REGION = "us-east1"
     JOB_NAME = "generate-silver-views-job"
     
@@ -171,7 +171,7 @@ def show_job_status():
     """
     print("📊 Estado del Cloud Run Job")
     
-    PROJECT_ID = "pph-central"
+    PROJECT_ID = "platform-partners-des"
     REGION = "us-east1"
     JOB_NAME = "generate-silver-views-job"
     
@@ -224,7 +224,7 @@ if __name__ == "__main__":
         print("  python generate_silver_views_job.py execute  - Solo ejecutar job existente")
         print("  python generate_silver_views_job.py status   - Ver estado del job")
         print("\n📋 Configuración:")
-        print("  Proyecto: pph-central")
+        print("  Proyecto: platform-partners-des")
         print("  Región: us-east1")
         print("  Job: generate-silver-views-job")
         print("  Memoria: 4Gi, CPU: 2")
