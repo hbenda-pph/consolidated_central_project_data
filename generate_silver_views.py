@@ -239,11 +239,9 @@ def generate_silver_view_sql(table_analysis, company_result):
         if source_type is None:
             continue
         
-        if source_type == target_type:
-            silver_fields.append(f"    {field_name}")
-        else:
-            cast_expression = generate_cast_for_field(field_name, source_type, target_type)
-            silver_fields.append(f"    {cast_expression} as {field_name}")
+        # SIEMPRE aplicar cast para asegurar consistencia de tipos
+        cast_expression = generate_cast_for_field(field_name, source_type, target_type)
+        silver_fields.append(f"    {cast_expression} as {field_name}")
         
     # 2. Procesar campos con conflictos de tipo
     for field_name, conflict_info in table_analysis['type_conflicts'].items():
@@ -258,11 +256,9 @@ def generate_silver_view_sql(table_analysis, company_result):
         if source_type is None:
             continue
         
-        if source_type == target_type:
-            silver_fields.append(f"    {field_name}")
-        else:
-            cast_expression = generate_cast_for_field(field_name, source_type, target_type)
-            silver_fields.append(f"    {cast_expression} as {field_name}")
+        # SIEMPRE aplicar cast para asegurar consistencia de tipos
+        cast_expression = generate_cast_for_field(field_name, source_type, target_type)
+        silver_fields.append(f"    {cast_expression} as {field_name}")
     
     # 3. Procesar campos faltantes (con valores por defecto)
     # IMPORTANTE: Mantener layout consistente para UNION ALL
@@ -436,9 +432,12 @@ def get_default_value_for_type(data_type):
     }
     return defaults.get(data_type, 'NULL')
 
-def generate_all_silver_views():
+def generate_all_silver_views(force_recreate=False):
     """
     Genera vistas Silver para todas las tablas identificadas con seguimiento de estados
+    
+    Args:
+        force_recreate (bool): Si True, recrea todas las vistas sin importar el estado de consolidación
     """
     print("🚀 Iniciando generación de vistas Silver para todas las tablas")
     
@@ -455,9 +454,15 @@ def generate_all_silver_views():
     
     print(f"📋 Compañías a procesar: {len(pending_companies)}")
     
-    # Usar configuración centralizada y filtrar tablas ya consolidadas
+    # Usar configuración centralizada
     all_tables = TABLES_TO_PROCESS
-    tables_to_process = tracking_manager.get_tables_to_process(all_tables)
+    
+    if force_recreate:
+        print("🔄 MODO FORZADO: Recreando todas las vistas sin importar estado de consolidación")
+        tables_to_process = all_tables
+    else:
+        print("📋 MODO NORMAL: Filtrando tablas ya consolidadas")
+        tables_to_process = tracking_manager.get_tables_to_process(all_tables)
     
     all_results = {}
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -478,12 +483,16 @@ def generate_all_silver_views():
     for table_name in tables_to_process:
         print(f"\n🔄 Procesando tabla: {table_name}")
         
-        # Verificar si la tabla ya está 100% consolidada
-        completion_status = tracking_manager.get_table_completion_status(table_name)
-        
-        if completion_status['is_fully_consolidated']:
-            print(f"  ⏭️  Saltando tabla '{table_name}' - 100% consolidada ({completion_status['completion_rate']:.1f}%)")
-            continue
+        # Verificar si la tabla ya está 100% consolidada (solo en modo normal)
+        if not force_recreate:
+            completion_status = tracking_manager.get_table_completion_status(table_name)
+            
+            if completion_status['is_fully_consolidated']:
+                print(f"  ⏭️  Saltando tabla '{table_name}' - 100% consolidada ({completion_status['completion_rate']:.1f}%)")
+                continue
+        else:
+            # En modo forzado, mostrar estado pero no saltar
+            completion_status = tracking_manager.get_table_completion_status(table_name)
         
         print(f"  📊 Estado actual: {completion_status['completion_rate']:.1f}% completada")
         print(f"     ✅ Éxitos: {completion_status['success_count']}")
@@ -669,12 +678,15 @@ def generate_all_silver_views():
     for table_name in all_tables:
         completion_status = tracking_manager.get_table_completion_status(table_name)
         
-        if completion_status['is_fully_consolidated']:
+        if not force_recreate and completion_status['is_fully_consolidated']:
             skipped_count += 1
             print(f"  ⏭️  {table_name}: SALTADA - 100% consolidada")
         else:
             processed_count += 1
-            print(f"  🔄 {table_name}: PROCESADA - {completion_status['completion_rate']:.1f}% completada")
+            if force_recreate:
+                print(f"  🔄 {table_name}: RECREADA - {completion_status['completion_rate']:.1f}% completada")
+            else:
+                print(f"  🔄 {table_name}: PROCESADA - {completion_status['completion_rate']:.1f}% completada")
     
     print(f"\n🎯 GENERACIÓN COMPLETADA")
     print(f"📁 Directorio: {output_dir}")
@@ -686,8 +698,21 @@ def generate_all_silver_views():
     return all_results, output_dir
 
 if __name__ == "__main__":
+    import sys
+    
+    # Verificar si se solicita recreación forzada
+    force_recreate = len(sys.argv) > 1 and sys.argv[1].lower() in ['--force', '-f', 'force']
+    
+    if force_recreate:
+        print("🔄 MODO FORZADO ACTIVADO: Recreando todas las vistas Silver")
+        print("⚠️  ADVERTENCIA: Esto puede tomar mucho tiempo")
+        confirm = input("¿Continuar? (y/N): ").strip().lower()
+        if confirm != 'y':
+            print("❌ Operación cancelada")
+            sys.exit(0)
+    
     # Ejecutar generación
-    results, output_dir = generate_all_silver_views()
+    results, output_dir = generate_all_silver_views(force_recreate=force_recreate)
     
     print(f"\n✅ Script completado exitosamente!")
     print(f"📁 Revisa los archivos en: {output_dir}")
