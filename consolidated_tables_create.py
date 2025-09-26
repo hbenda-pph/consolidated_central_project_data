@@ -17,7 +17,7 @@ class ConsolidatedTableCreator:
         self.client = bigquery.Client(project=PROJECT_CENTRAL)
         self.metadata_manager = ConsolidatedMetadataManager()
         self.tracking_manager = ConsolidationTrackingManager()
-        self.central_bronze_dataset = f"{PROJECT_CENTRAL}.central-bronze"
+        self.central_bronze_dataset = f"{PROJECT_CENTRAL}.bronze"
     
     def get_companies_with_silver_views(self, table_name):
         """

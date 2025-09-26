@@ -16,13 +16,13 @@ warnings.filterwarnings('ignore')
 
 # Configuración
 PROJECT_SOURCE = "platform-partners-qua"
-CENTRAL_PROJECT = "platform-partners-des"  # Ajustar según tu proyecto central
+from config import PROJECT_CENTRAL
 DATASET_NAME = "settings"
 TABLE_NAME = "companies"
 
 print(f"🔧 Configuración:")
 print(f"   Proyecto fuente: {PROJECT_SOURCE}")
-print(f"   Proyecto central: {CENTRAL_PROJECT}")
+print(f"   Proyecto central: {PROJECT_CENTRAL}")
 print(f"   Dataset: {DATASET_NAME}")
 
 # Crear cliente
@@ -61,7 +61,7 @@ def generate_consolidated_view_sql(table_name, companies_df):
 -- Generada automáticamente el {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 -- Consolida datos de {len(companies_df)} compañías
 
-CREATE OR REPLACE VIEW `{CENTRAL_PROJECT}.central-silver.vw_consolidated_{table_name}` AS (
+CREATE OR REPLACE VIEW `{PROJECT_CENTRAL}.silver.vw_consolidated_{table_name}` AS (
 {chr(10).join([f"  {part}" if i == 0 else f"  UNION ALL{chr(10)}  {part}" for i, part in enumerate(union_parts)])}
 );
 
@@ -113,7 +113,7 @@ def generate_all_consolidated_views():
             
             # Ejecutar vista directamente en BigQuery
             try:
-                print(f"  🔄 Creando vista consolidada: {CENTRAL_PROJECT}.central-silver.vw_consolidated_{table_name}")
+                print(f"  🔄 Creando vista consolidada: {PROJECT_CENTRAL}.silver.vw_consolidated_{table_name}")
                 query_job = client.query(sql_content)
                 query_job.result()  # Esperar a que termine
                 print(f"  ✅ Vista consolidada creada: {table_name}")
@@ -130,7 +130,7 @@ def generate_all_consolidated_views():
     with open(master_filename, 'w', encoding='utf-8') as f:
         f.write(f"-- Script maestro para ejecutar todas las vistas consolidadas\n")
         f.write(f"-- Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"-- Proyecto central: {CENTRAL_PROJECT}\n\n")
+        f.write(f"-- Proyecto central: {PROJECT_CENTRAL}\n\n")
         
         f.write(f"-- IMPORTANTE: Asegúrate de que todas las vistas Silver estén creadas\n")
         f.write(f"-- en cada proyecto de compañía antes de ejecutar este script.\n\n")
@@ -145,7 +145,7 @@ def generate_all_consolidated_views():
     summary_filename = f"{output_dir}/CONSOLIDATION_SUMMARY.md"
     with open(summary_filename, 'w', encoding='utf-8') as f:
         f.write(f"# Resumen de Vistas Consolidadas\n\n")
-        f.write(f"**Proyecto central:** {CENTRAL_PROJECT}\n")
+        f.write(f"**Proyecto central:** {PROJECT_CENTRAL}\n")
         f.write(f"**Fecha:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"**Compañías:** {len(companies_df)}\n\n")
         
@@ -163,7 +163,7 @@ def generate_all_consolidated_views():
         
         f.write(f"## Estructura de las Vistas\n\n")
         f.write(f"Cada vista consolidada:\n")
-        f.write(f"- Se crea en: `{CENTRAL_PROJECT}.central-silver.vw_consolidated_{{table_name}}`\n")
+        f.write(f"- Se crea en: `{PROJECT_CENTRAL}.silver.vw_consolidated_{{table_name}}`\n")
         f.write(f"- Consolida datos de {len(companies_df)} compañías\n")
         f.write(f"- Incluye campos normalizados y metadata\n")
         f.write(f"- Usa UNION ALL para máxima performance\n")

@@ -1,107 +1,102 @@
-# Consolidated Central Project Data
+# Sistema de Consolidación de Datos BigQuery
 
-Scripts para generar vistas Silver normalizadas y consolidadas para todas las tablas de ServiceTitan.
+## Descripción
+Sistema automatizado para consolidar datos de múltiples proyectos BigQuery (compañías) en un proyecto central, siguiendo la arquitectura Bronze-Silver-Gold.
 
-## 🎯 Objetivo
+## Arquitectura
+- **Bronze**: Datos raw extraídos de ServiceTitan
+- **Silver**: Datos normalizados por compañía
+- **Silver**: Datos consolidados de todas las compañías
+- **Bronze**: Tablas consolidadas optimizadas con particionado y clusterizado
 
-**Bronze** → **Silver** (por compañía, normalizado) → **Central-Silver** (consolidado)
+## Scripts Principales
 
-### 🔧 Características
-- Normalización de campos y tipos de datos
-- CAST automático para tipos incompatibles
-- Filtro de campos `_fivetran`
-- Seguimiento de estados de consolidación
+### 1. `generate_silver_views.py`
+Genera vistas Silver por compañía con normalización de campos y tipos de datos.
 
-## 📁 Archivos Principales
-
-- `cloud_shell_runner.py` - Script principal con gestión completa
-- `generate_silver_views.py` - Genera vistas Silver con seguimiento de estados
-- `generate_central_consolidated_views.py` - Genera vistas consolidadas centrales
-- `consolidation_status_manager.py` - Gestión de estados de consolidación
-- `config.py` - Configuración centralizada
-
-## 🚀 Uso en Cloud Shell
-
-### 1. Configuración
+**Uso:**
 ```bash
-# Clonar repositorio
-git clone <tu-repo-url> consolidated_central_project_data
-cd consolidated_central_project_data
-
-# Instalar dependencias
-pip install -r requirements.txt
-
-# Configurar autenticación
-gcloud auth login
-gcloud config set project <tu-proyecto-central>
+python generate_silver_views.py
 ```
 
-### 2. Configurar Parámetros
-Edita `config.py` con tus valores:
-```python
-PROJECT_SOURCE = "platform-partners-qua"
-CENTRAL_PROJECT = "platform-partners-des"
-DATASET_NAME = "settings"
-TABLE_NAME = "companies"
-```
+**Características:**
+- Analiza diferencias de esquemas entre compañías
+- Normaliza tipos de datos (JSON → STRING, etc.)
+- Maneja campos faltantes con COALESCE
+- Actualiza estado de consolidación
+- Salta tablas ya 100% consolidadas
 
-### 3. Comandos Principales
+### 2. `consolidated_tables_create.py`
+Crea tablas consolidadas en bronze con particionado y clusterizado.
+
+**Uso:**
 ```bash
-# Configuración inicial
-python cloud_shell_setup.py
-
-# Proceso completo con gestión robusta
-python cloud_shell_runner.py all
-
-# Solo análisis de prueba
-python cloud_shell_runner.py test
-
-# Solo generar vistas Silver
-python cloud_shell_runner.py silver
-
-# Validar vistas creadas
-python cloud_shell_runner.py validate
+python consolidated_tables_create.py
 ```
 
-### 4. Gestión de Estados
+**Características:**
+- Usa metadatos para configuración de particionado/clusterizado
+- Crea tablas optimizadas para performance
+- Solo procesa tablas 100% consolidadas
+
+### 3. `consolidated_metadata_manager.py`
+Maneja metadatos de configuración para tablas consolidadas.
+
+**Funciones:**
+- Análisis automático de campos de particionado
+- Configuración de clusterizado
+- Gestión de estrategias de actualización
+
+### 4. `consolidated_metadata_update.py`
+Actualiza configuración de metadatos de forma interactiva.
+
+**Uso:**
 ```bash
-# Ver resumen de estados
-python consolidation_status_manager.py summary
-
-# Ver compañías pendientes
-python consolidation_status_manager.py pending
-
-# Ver compañías completadas
-python consolidation_status_manager.py completed
-
-# Ver compañías con errores
-python consolidation_status_manager.py errors
-
-# Resetear todos los estados
-python consolidation_status_manager.py reset
+python consolidated_metadata_update.py
 ```
 
-## 📊 Estados de Consolidación
+## Tablas de Control
 
-### Estados Disponibles
-- **0 - PENDING**: Por consolidar (estado inicial)
-- **1 - COMPLETED**: Consolidación exitosa
-- **2 - ERROR**: Error en el proceso
+### `companies_consolidated`
+Rastrea el estado de consolidación por compañía y tabla:
+- `company_id`: ID de la compañía
+- `table_name`: Nombre de la tabla
+- `consolidated_status`: 0=No existe, 1=Éxito, 2=Error
+- `created_at`, `updated_at`: Timestamps
+- `error_message`: Mensaje de error si aplica
 
-### Seguimiento Automático
-- **Generación Silver**: Actualiza estado automáticamente
-- **Solo procesa PENDING**: Evita reprocesar compañías
-- **Control de errores**: Identifica compañías con problemas
+### `metadata_consolidated_tables`
+Configuración de metadatos para tablas consolidadas:
+- `table_name`: Nombre de la tabla
+- `partition_fields`: Array de campos para particionado
+- `cluster_fields`: Array de campos para clusterizado (máx. 4)
+- `update_strategy`: incremental o full_refresh
 
-## 📋 Resultados
+## Flujo de Trabajo
 
-### Vistas Silver (por compañía)
-- Ubicación: `{project_id}.silver.vw_{table_name}`
-- Normalización de campos y tipos de datos
-- Filtro automático de campos `_fivetran`
+1. **Generar vistas Silver** por compañía
+2. **Inicializar metadatos**: `python consolidated_metadata_initialize.py`
+3. **Configurar metadatos** (opcional): `python consolidated_metadata_update.py`
+4. **Crear tablas consolidadas**: `python consolidated_tables_create.py`
+5. **Crear vistas consolidadas** en silver
 
-### Vistas Consolidadas (central)
-- Ubicación: `{central_project}.central-silver.vw_consolidated_{table_name}`
-- UNION ALL de todas las vistas Silver
-- Incluye campos `company_project_id` y `company_id`
-- Solo incluye compañías con estado COMPLETED
+## Configuración
+
+### Campos de Particionado (orden de prioridad)
+1. `created_on`
+2. `updated_on`
+3. `date_created`
+4. `modified_on`
+5. `timestamp`
+
+### Clusterizado por Defecto
+- `company_id` (principal)
+- Campos adicionales configurables por tabla
+
+## Notas Importantes
+
+- Las vistas Silver excluyen campos `_fivetran*`
+- Se manejan automáticamente diferencias de tipos de datos
+- El sistema salta tablas ya procesadas exitosamente
+- Se requiere autenticación BigQuery configurada
+- Los metadatos se almacenan en el dataset `management`

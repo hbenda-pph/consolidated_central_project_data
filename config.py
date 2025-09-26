@@ -175,8 +175,8 @@ def validate_config():
     if not PROJECT_SOURCE:
         errors.append("PROJECT_SOURCE no puede estar vacío")
     
-    if not CENTRAL_PROJECT:
-        errors.append("CENTRAL_PROJECT no puede estar vacío")
+    if not PROJECT_CENTRAL:
+        errors.append("PROJECT_CENTRAL no puede estar vacío")
     
     # Validar datasets
     if not SILVER_DATASET:
