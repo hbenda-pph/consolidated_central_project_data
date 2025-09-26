@@ -29,9 +29,11 @@ def deploy_cloud_run_job():
     try:
         # 1. Construir imagen Docker
         print("\n📦 Construyendo imagen Docker...")
+        print(f"   Comando: gcloud builds submit --tag {IMAGE_NAME} .")
         build_cmd = [
             "gcloud", "builds", "submit", 
             "--tag", IMAGE_NAME,
+            "--timeout", "1200s",
             "."
         ]
         
