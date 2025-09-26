@@ -15,7 +15,7 @@ def deploy_cloud_run_job():
     print("🚀 Desplegando Cloud Run Job para generar vistas Silver")
     
     # Configuración
-    PROJECT_ID = "pph-central"
+    PROJECT_ID = "platform-partners-des"
     REGION = "us-east1"
     JOB_NAME = "generate-silver-views-job"
     IMAGE_NAME = f"gcr.io/{PROJECT_ID}/silver-views-generator"
@@ -32,7 +32,6 @@ def deploy_cloud_run_job():
         build_cmd = [
             "gcloud", "builds", "submit", 
             "--tag", IMAGE_NAME,
-            "--file", "Dockerfile",
             "."
         ]
         
