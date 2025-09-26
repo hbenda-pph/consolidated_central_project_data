@@ -75,7 +75,7 @@ class ConsolidatedTableCreator:
             print(f"  ⚠️  No hay compañías con vistas Silver para {table_name}")
             return False
         
-        print(f"  📋 Compañías encontradas: {len(companies)}")
+        print(f"  📋 Compañías disponibles: {len(companies)}")
         
         # 2. Obtener metadatos de la tabla
         metadata = self.metadata_manager.get_table_metadata(table_name)
@@ -149,20 +149,21 @@ class ConsolidatedTableCreator:
         print("🚀 INICIANDO CREACIÓN DE TABLAS CONSOLIDADAS")
         print("=" * 60)
         
-        # Obtener tablas que están 100% consolidadas
+        # Obtener tablas que tienen al menos una compañía con vista Silver exitosa
         tables_to_process = []
         
         for table_name in TABLES_TO_PROCESS:
-            completion_status = self.tracking_manager.get_table_completion_status(table_name)
+            # Verificar si hay al menos una compañía con status = 1 (éxito)
+            companies = self.get_companies_with_silver_views(table_name)
             
-            if completion_status['is_fully_consolidated']:
+            if companies:
                 tables_to_process.append(table_name)
-                print(f"✅ {table_name}: 100% consolidada - PROCESAR")
+                print(f"✅ {table_name}: {len(companies)} compañías disponibles - PROCESAR")
             else:
-                print(f"⏭️  {table_name}: {completion_status['completion_rate']:.1f}% completada - SALTAR")
+                print(f"⏭️  {table_name}: Sin compañías disponibles - SALTAR")
         
         if not tables_to_process:
-            print("⚠️  No hay tablas 100% consolidadas para procesar")
+            print("⚠️  No hay tablas con compañías disponibles para procesar")
             return
         
         print(f"\n📋 Tablas a procesar: {len(tables_to_process)}")
