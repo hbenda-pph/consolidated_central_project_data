@@ -47,7 +47,7 @@ class MetadataInitializer:
             
             for _, row in companies_df.iterrows():
                 project_id = row['company_project_id']
-                dataset_name = f"servicetitan_{project_id.replace('_', '-')}"
+                dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
                 
                 try:
                     # Obtener tablas del dataset

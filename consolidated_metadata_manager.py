@@ -91,7 +91,7 @@ class ConsolidatedMetadataManager:
             
             # Analizar campos en la primera compañía disponible
             project_id = companies_df.iloc[0]['company_project_id']
-            dataset_name = f"servicetitan_{project_id.replace('_', '-')}"
+            dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
             
             # Buscar campos TIMESTAMP
             fields_query = f"""
