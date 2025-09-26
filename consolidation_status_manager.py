@@ -103,6 +103,9 @@ class ConsolidationStatusManager:
                 WHERE company_id IN ({ids_str})
             """
             
+            # Debug: Mostrar la consulta
+            self.logger.info(f"🔍 Consulta UPDATE: {update_query}")
+            
             result = self.client.query(update_query).result()
             self.logger.info(f"✅ Estado actualizado para {len(company_ids)} compañías: {status}")
             
@@ -110,6 +113,7 @@ class ConsolidationStatusManager:
             
         except Exception as e:
             self.logger.error(f"❌ Error actualizando estados múltiples: {str(e)}")
+            self.logger.error(f"🔍 Consulta que falló: {update_query}")
             return False
     
     def get_companies_by_status(self, status):
