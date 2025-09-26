@@ -50,7 +50,7 @@ class MetadataInitializer:
                 dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
                 
                 try:
-                    # Obtener tablas del dataset
+                    # Obtener tablas del dataset (excluyendo tablas _fivetran)
                     tables_query = f"""
                     SELECT table_name
                     FROM `{project_id}.{dataset_name}.INFORMATION_SCHEMA.TABLES`

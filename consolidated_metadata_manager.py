@@ -93,12 +93,13 @@ class ConsolidatedMetadataManager:
             project_id = companies_df.iloc[0]['company_project_id']
             dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
             
-            # Buscar campos TIMESTAMP
+            # Buscar campos TIMESTAMP (excluyendo campos _fivetran)
             fields_query = f"""
             SELECT column_name
             FROM `{project_id}.{dataset_name}.INFORMATION_SCHEMA.COLUMNS`
             WHERE table_name = '{table_name}'
               AND data_type IN ('TIMESTAMP', 'DATETIME', 'DATE')
+              AND column_name NOT LIKE '_fivetran%'
             ORDER BY ordinal_position
             """
             
