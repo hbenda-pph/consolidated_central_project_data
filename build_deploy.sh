@@ -10,7 +10,7 @@ set -e  # Salir si hay algún error
 PROJECT_ID="platform-partners-des"
 JOB_NAME="generate-silver-views-job"
 REGION="us-east1"
-SERVICE_ACCOUNT="bigquery-service-account@${PROJECT_ID}.iam.gserviceaccount.com"
+SERVICE_ACCOUNT="data-analytics@${PROJECT_ID}.iam.gserviceaccount.com"
 IMAGE_TAG="gcr.io/${PROJECT_ID}/${JOB_NAME}"
 
 echo "🚀 Iniciando Build & Deploy para Generate Silver Views Job"
