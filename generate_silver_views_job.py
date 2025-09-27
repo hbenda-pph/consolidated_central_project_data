@@ -62,7 +62,6 @@ def deploy_cloud_run_job():
                 "--cpu", "2",
                 "--max-retries", "3",
                 "--parallelism", "1",
-                "--task-count", "1",
                 "--set-env-vars", "PYTHONUNBUFFERED=1"
             ]
         else:
@@ -76,7 +75,6 @@ def deploy_cloud_run_job():
                 "--cpu", "2",
                 "--max-retries", "3",
                 "--parallelism", "1",
-                "--task-count", "1",
                 "--set-env-vars", "PYTHONUNBUFFERED=1"
             ]
         
