@@ -1,24 +1,15 @@
-# Dependencias para Consolidated Central Project Data
-# Scripts de generación de vistas Silver y consolidadas
+# =============================================================================
+# REQUIREMENTS.TXT PARA GENERATE SILVER VIEWS JOB
+# =============================================================================
 
-# Google Cloud BigQuery
+# Google Cloud
 google-cloud-bigquery>=3.11.0
+google-cloud-core>=2.3.0
+db-dtypes>=1.1.0
 
-# Data manipulation
+# Data processing
 pandas>=1.5.0
-numpy>=1.21.0
+numpy>=1.24.0
 
-# Utilities
+# Additional dependencies
 python-dateutil>=2.8.0
-
-# Optional: Para exportación a Excel
-openpyxl>=3.0.0
-
-# Optional: Para visualizaciones
-matplotlib>=3.5.0
-seaborn>=0.11.0
-
-# Development dependencies (opcional)
-# pytest>=7.0.0
-# black>=22.0.0
-# flake8>=4.0.0

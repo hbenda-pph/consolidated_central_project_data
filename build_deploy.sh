@@ -1,0 +1,117 @@
+#!/bin/bash
+
+# =============================================================================
+# SCRIPT DE BUILD & DEPLOY PARA GENERATE SILVER VIEWS JOB
+# =============================================================================
+
+set -e  # Salir si hay algún error
+
+# Configuración
+PROJECT_ID="platform-partners-des"
+JOB_NAME="generate-silver-views-job"
+REGION="us-east1"
+SERVICE_ACCOUNT="bigquery-service-account@${PROJECT_ID}.iam.gserviceaccount.com"
+IMAGE_TAG="gcr.io/${PROJECT_ID}/${JOB_NAME}"
+
+echo "🚀 Iniciando Build & Deploy para Generate Silver Views Job"
+echo "======================================================="
+echo "📋 Configuración:"
+echo "   Proyecto: ${PROJECT_ID}"
+echo "   Job: ${JOB_NAME}"
+echo "   Región: ${REGION}"
+echo "   Imagen: ${IMAGE_TAG}"
+echo "   Service Account: ${SERVICE_ACCOUNT}"
+echo ""
+
+# Verificar que estamos en el directorio correcto
+if [ ! -f "generate_silver_views.py" ]; then
+    echo "❌ Error: generate_silver_views.py no encontrado. Ejecuta este script desde el directorio consolidated_central_project_data/"
+    exit 1
+fi
+
+# Verificar que gcloud está configurado
+if ! command -v gcloud &> /dev/null; then
+    echo "❌ Error: gcloud CLI no está instalado o no está en el PATH"
+    exit 1
+fi
+
+# Verificar proyecto activo
+CURRENT_PROJECT=$(gcloud config get-value project)
+if [ "$CURRENT_PROJECT" != "$PROJECT_ID" ]; then
+    echo "⚠️  Proyecto actual: ${CURRENT_PROJECT}"
+    echo "🔧 Configurando proyecto a: ${PROJECT_ID}"
+    gcloud config set project ${PROJECT_ID}
+fi
+
+echo ""
+echo "🔨 PASO 1: BUILD (Creando imagen Docker)"
+echo "=========================================="
+gcloud builds submit --tag ${IMAGE_TAG}
+
+if [ $? -eq 0 ]; then
+    echo "✅ Build exitoso!"
+else
+    echo "❌ Error en el build"
+    exit 1
+fi
+
+echo ""
+echo "🚀 PASO 2: CREATE/UPDATE JOB"
+echo "============================="
+
+# Verificar si el job ya existe
+if gcloud run jobs describe ${JOB_NAME} --region=${REGION} &> /dev/null; then
+    echo "📝 Job existe, actualizando..."
+    gcloud run jobs update ${JOB_NAME} \
+        --image ${IMAGE_TAG} \
+        --region ${REGION} \
+        --memory 4Gi \
+        --cpu 2 \
+        --max-retries 3 \
+        --parallelism 1 \
+        --set-env-vars PYTHONUNBUFFERED=1 \
+        --service-account ${SERVICE_ACCOUNT}
+else
+    echo "🆕 Job no existe, creando..."
+    gcloud run jobs create ${JOB_NAME} \
+        --image ${IMAGE_TAG} \
+        --region ${REGION} \
+        --memory 4Gi \
+        --cpu 2 \
+        --max-retries 3 \
+        --parallelism 1 \
+        --set-env-vars PYTHONUNBUFFERED=1 \
+        --service-account ${SERVICE_ACCOUNT}
+fi
+
+if [ $? -eq 0 ]; then
+    echo "✅ Job creado/actualizado exitosamente!"
+else
+    echo "❌ Error creando/actualizando job"
+    exit 1
+fi
+
+echo ""
+echo "▶️  PASO 3: EJECUTAR JOB"
+echo "========================="
+gcloud run jobs execute ${JOB_NAME} --region=${REGION} --wait
+
+if [ $? -eq 0 ]; then
+    echo "✅ Job ejecutado exitosamente!"
+else
+    echo "❌ Error ejecutando job"
+    exit 1
+fi
+
+echo ""
+echo "🎉 ¡PROCESO COMPLETADO EXITOSAMENTE!"
+echo "===================================="
+echo ""
+echo "📊 Para ver logs del job:"
+echo "   gcloud run jobs logs ${JOB_NAME} --region=${REGION}"
+echo ""
+echo "🔧 Para ver estado del job:"
+echo "   gcloud run jobs describe ${JOB_NAME} --region=${REGION}"
+echo ""
+echo "🛑 Para eliminar el job:"
+echo "   gcloud run jobs delete ${JOB_NAME} --region=${REGION}"
