@@ -281,6 +281,11 @@ def generate_silver_view_sql(table_analysis, company_result):
     dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
     view_name = f"vw_{table_name}"
     
+    # Validar que hay campos para procesar
+    if not silver_fields:
+        print(f"  ⚠️  No hay campos para procesar en {company_name} - {table_name}")
+        return None
+    
     # Agregar comas entre campos (excepto el último)
     fields_with_commas = []
     for i, field in enumerate(silver_fields):
@@ -539,6 +544,17 @@ def generate_all_silver_views(force_recreate=False):
             
             # Generar y ejecutar SQL directamente
             sql_content = generate_silver_view_sql(table_analysis, company_result)
+            
+            # Validar que se generó SQL válido
+            if sql_content is None:
+                print(f"    ⚠️  No se pudo generar SQL para {company_name}")
+                tracking_manager.update_status(
+                    company_id=company_result['company_id'],
+                    table_name=table_name,
+                    status=2,
+                    notes="Error generando SQL - sin campos válidos"
+                )
+                continue
             
             # Ejecutar vista directamente en BigQuery con reconexión automática
             max_retries = 3

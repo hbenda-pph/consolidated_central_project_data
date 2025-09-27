@@ -22,5 +22,8 @@ COPY . .
 # Configurar permisos
 RUN chmod +x generate_silver_views.py
 
+# Configurar autenticación (usar service account del job)
+ENV GOOGLE_APPLICATION_CREDENTIALS=/secrets/service-account.json
+
 # Comando por defecto
 CMD ["python", "generate_silver_views.py", "--force"]

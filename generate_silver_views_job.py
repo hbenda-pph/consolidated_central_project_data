@@ -62,7 +62,8 @@ def deploy_cloud_run_job():
                 "--cpu", "2",
                 "--max-retries", "3",
                 "--parallelism", "1",
-                "--set-env-vars", "PYTHONUNBUFFERED=1"
+                "--set-env-vars", "PYTHONUNBUFFERED=1",
+                "--service-account", f"bigquery-service-account@{PROJECT_ID}.iam.gserviceaccount.com"
             ]
         else:
             # Job no existe, crear
@@ -75,7 +76,8 @@ def deploy_cloud_run_job():
                 "--cpu", "2",
                 "--max-retries", "3",
                 "--parallelism", "1",
-                "--set-env-vars", "PYTHONUNBUFFERED=1"
+                "--set-env-vars", "PYTHONUNBUFFERED=1",
+                "--service-account", f"bigquery-service-account@{PROJECT_ID}.iam.gserviceaccount.com"
             ]
         
         result = subprocess.run(create_cmd, capture_output=True, text=True)
@@ -105,13 +107,15 @@ def deploy_cloud_run_job():
         logs_cmd = [
             "gcloud", "run", "jobs", "logs", JOB_NAME,
             "--region", REGION,
-            "--limit", "50"
+            "--limit", "100"
         ]
         
         result = subprocess.run(logs_cmd, capture_output=True, text=True)
         if result.returncode == 0:
             print("📋 Logs del job:")
             print(result.stdout)
+            if "FAILED" in result.stdout or "ERROR" in result.stdout:
+                print("\n❌ Job falló. Revisar logs arriba para identificar el error.")
         else:
             print(f"⚠️  No se pudieron obtener logs: {result.stderr}")
         
@@ -201,6 +205,20 @@ def show_job_status():
         if result.returncode == 0:
             print("\n📈 Ejecuciones recientes:")
             print(result.stdout)
+        
+        # Mostrar logs de la última ejecución
+        print("\n📋 Logs de la última ejecución:")
+        logs_cmd = [
+            "gcloud", "run", "jobs", "logs", JOB_NAME,
+            "--region", REGION,
+            "--limit", "100"
+        ]
+        
+        result = subprocess.run(logs_cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(result.stdout)
+        else:
+            print(f"⚠️  No se pudieron obtener logs: {result.stderr}")
         
     except Exception as e:
         print(f"❌ Error inesperado: {str(e)}")
