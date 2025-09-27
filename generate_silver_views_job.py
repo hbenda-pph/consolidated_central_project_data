@@ -99,7 +99,7 @@ def analyze_table_fields_across_companies(table_name):
                         field_types[field_name].append(field_type)
                     
                     print(f"  ✅ {company_name}: {len(company_fields)} campos")
-        else:
+                else:
                     print(f"  ⚠️  {company_name}: Tabla no encontrada")
                     
             except Exception as e:
