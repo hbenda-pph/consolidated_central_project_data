@@ -229,10 +229,7 @@ class ConsolidationStatusManager:
         """
         if not confirm:
             print("⚠️  Esta acción reseteará TODOS los estados a 'PENDING'")
-            response = input("¿Estás seguro? (yes/no): ")
-            if response.lower() != 'yes':
-                print("❌ Operación cancelada")
-                return False
+            print("✅ Continuando automáticamente en modo job...")
         
         try:
             query = f"""

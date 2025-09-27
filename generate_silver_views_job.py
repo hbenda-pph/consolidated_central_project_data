@@ -325,7 +325,7 @@ FROM `{project_id}.{dataset_name}.{table_name}`
     
     return sql
 
-def generate_all_silver_views():
+def generate_all_silver_views(force_recreate=True):
     """
     Genera vistas Silver para todas las tablas identificadas (VERSIÓN JOB - NO INTERACTIVO)
     """
@@ -335,16 +335,38 @@ def generate_all_silver_views():
     status_manager = ConsolidationStatusManager()
     tracking_manager = ConsolidationTrackingManager()
     
-    # Obtener compañías pendientes de consolidación
-    try:
-        pending_companies = status_manager.get_companies_by_status(0)
-        if pending_companies.empty:
+    # En modo job, usar TODAS las compañías (force_recreate=True)
+    if force_recreate:
+        print("🔄 MODO JOB: Procesando TODAS las compañías activas")
+        try:
+            # Obtener todas las compañías activas
+            all_companies_query = f"""
+            SELECT 
+                company_id,
+                company_name,
+                company_project_id
+            FROM `{PROJECT_SOURCE}.settings.companies`
+            WHERE company_fivetran_status = TRUE 
+              AND company_bigquery_status = TRUE
+              AND company_project_id IS NOT NULL
+            ORDER BY company_id
+            """
+            client = create_bigquery_client()
+            pending_companies = client.query(all_companies_query).to_dataframe()
+        except Exception as e:
+            print(f"⚠️  Error obteniendo compañías: {str(e)}")
+            return {}, {}
+    else:
+        # Obtener compañías pendientes de consolidación
+        try:
+            pending_companies = status_manager.get_companies_by_status(0)
+            if pending_companies.empty:
+                print("ℹ️  No hay compañías pendientes de consolidación")
+                return {}, {}
+        except Exception as e:
+            print(f"⚠️  Error obteniendo compañías pendientes: {str(e)}")
             print("ℹ️  No hay compañías pendientes de consolidación")
             return {}, {}
-    except Exception as e:
-        print(f"⚠️  Error obteniendo compañías pendientes: {str(e)}")
-        print("ℹ️  No hay compañías pendientes de consolidación")
-        return {}, {}
     
     print(f"📋 Compañías a procesar: {len(pending_companies)}")
     
@@ -366,13 +388,16 @@ def generate_all_silver_views():
     for table_name in all_tables:
         print(f"\n🔄 Procesando tabla: {table_name}")
         
-        # Verificar si la tabla ya está 100% consolidada (saltar en modo job)
+        # En modo job, mostrar estado pero NO saltar tablas
         completion_status = tracking_manager.get_table_completion_status(table_name)
         
         print(f"  📊 Estado actual: {completion_status['completion_rate']:.1f}% completada")
         print(f"     ✅ Éxitos: {completion_status['success_count']}")
         print(f"     ❌ Errores: {completion_status['error_count']}")
         print(f"     ⚠️  No existe: {completion_status['missing_count']}")
+        
+        # En modo job, procesar TODAS las tablas sin importar el estado
+        print(f"  🔄 MODO JOB: Procesando sin importar estado de consolidación")
         
         # Analizar campos de la tabla
         table_analysis = analyze_table_fields_across_companies(table_name)
@@ -520,6 +545,7 @@ def generate_all_silver_views():
 if __name__ == "__main__":
     # Ejecutar generación (VERSIÓN JOB - SIN INTERACCIÓN)
     print("🚀 GENERATE SILVER VIEWS JOB - INICIANDO")
-    results, output_dir = generate_all_silver_views()
+    print("🔄 MODO FORZADO: Procesando TODAS las compañías y tablas")
+    results, output_dir = generate_all_silver_views(force_recreate=True)
     print(f"\n✅ JOB COMPLETADO EXITOSAMENTE!")
     print(f"📁 Revisa los archivos en: {output_dir}")

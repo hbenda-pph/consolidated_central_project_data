@@ -1,15 +1,6 @@
-# =============================================================================
-# REQUIREMENTS.TXT PARA GENERATE SILVER VIEWS JOB
-# =============================================================================
-
-# Google Cloud
 google-cloud-bigquery>=3.11.0
 google-cloud-core>=2.3.0
 db-dtypes>=1.1.0
-
-# Data processing
 pandas>=1.5.0
 numpy>=1.24.0
-
-# Additional dependencies
 python-dateutil>=2.8.0

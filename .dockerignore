@@ -1,6 +1,5 @@
 # Ignorar archivos innecesarios en el build
 *.md
-*.txt
 *.log
 *.csv
 *.json
