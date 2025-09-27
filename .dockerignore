@@ -1,0 +1,20 @@
+# Ignorar archivos innecesarios en el build
+*.md
+*.txt
+*.log
+*.csv
+*.json
+*.sql
+*.ipynb
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.git/
+.gitignore
+.DS_Store
+Thumbs.db
