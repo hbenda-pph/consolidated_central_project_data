@@ -99,7 +99,7 @@ def analyze_table_fields_across_companies(table_name):
                         field_types[field_name].append(field_type)
                     
                     print(f"  ✅ {company_name}: {len(company_fields)} campos")
-                else:
+        else:
                     print(f"  ⚠️  {company_name}: Tabla no encontrada")
                     
             except Exception as e:
@@ -131,7 +131,7 @@ def analyze_table_fields_across_companies(table_name):
                         'type': consensus_type,
                         'occurrences': field_occurrences
                     }
-                else:
+        else:
                     # Hay conflictos de tipo
                     type_conflicts[field_name] = {
                         'consensus_type': consensus_type,
@@ -451,13 +451,13 @@ def generate_all_silver_views(force_recreate=True):
                 continue
             
             # Ejecutar vista directamente en BigQuery con reconexión automática
+            client = create_bigquery_client()  # Crear cliente inicial
             max_retries = 3
             for attempt in range(max_retries):
                 try:
                     if attempt > 0:
                         print(f"    🔄 Reintento {attempt + 1}/{max_retries} para {company_name}")
                         # Recrear cliente en caso de error de autenticación
-                        global client
                         client = create_bigquery_client()
                         import time
                         time.sleep(2)
@@ -492,7 +492,7 @@ def generate_all_silver_views(force_recreate=True):
                             status=2,
                             notes=f"Error: {str(e)}"
                         )
-                    else:
+        else:
                         print(f"    ⚠️  Error en intento {attempt + 1}: {str(e)}")
         
         # Guardar resultados
