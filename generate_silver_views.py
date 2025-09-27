@@ -123,7 +123,7 @@ def analyze_table_fields_across_companies(table_name):
         
         if project_id is None:
             continue
-            
+        
         # Obtener campos de la tabla
         fields_df = get_table_fields_with_types(project_id, table_name)
         
@@ -294,13 +294,16 @@ def generate_silver_view_sql(table_analysis, company_result):
         else:
             fields_with_commas.append(field)
     
+    # Crear el contenido de campos con saltos de línea
+    fields_content = '\n'.join(fields_with_commas)
+    
     sql = f"""-- Vista Silver para {company_name} - Tabla {table_name}
 -- Generada automáticamente el {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 -- Incluye normalización de tipos de datos
 
 CREATE OR REPLACE VIEW `{project_id}.silver.{view_name}` AS (
 SELECT
-{'\n'.join(fields_with_commas)}
+{fields_content}
 FROM `{project_id}.{dataset_name}.{table_name}`
 );
 """
@@ -345,7 +348,7 @@ def analyze_data_types_for_table(table_analysis_results):
                 'companies': type_info_list,
                 'consensus_type': determine_consensus_type(unique_types, type_info_list)
             }
-        else:
+    else:
             # No hay conflicto
             field_consensus[field_name] = {
                 'type': unique_types[0],
