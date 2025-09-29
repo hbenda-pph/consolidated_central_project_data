@@ -38,3 +38,5 @@ config_local.py
 # Archivos de backup
 *.bak
 *.backup
+
+

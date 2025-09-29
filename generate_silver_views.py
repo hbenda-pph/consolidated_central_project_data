@@ -225,11 +225,12 @@ def generate_silver_view_sql(table_analysis, company_result):
     company_field_names = set(company_fields.keys())
     
     silver_fields = []
+    processed_fields = set()  # Para evitar duplicados
     
     # 1. Procesar campos comunes (sin conflictos de tipo)
     for field_name, field_info in table_analysis['field_consensus'].items():
-        # SOLO incluir campos que existen en esta compañía
-        if field_name not in company_field_names:
+        # SOLO incluir campos que existen en esta compañía y no se han procesado
+        if field_name not in company_field_names or field_name in processed_fields:
             continue
             
         target_type = field_info['type']
@@ -242,11 +243,12 @@ def generate_silver_view_sql(table_analysis, company_result):
         # SIEMPRE aplicar cast para asegurar consistencia de tipos
         cast_expression = generate_cast_for_field(field_name, source_type, target_type)
         silver_fields.append(f"    {cast_expression} as {field_name}")
+        processed_fields.add(field_name)
         
-    # 2. Procesar campos con conflictos de tipo
+    # 2. Procesar campos con conflictos de tipo (solo los no procesados)
     for field_name, conflict_info in table_analysis['type_conflicts'].items():
-        # SOLO incluir campos que existen en esta compañía
-        if field_name not in company_field_names:
+        # SOLO incluir campos que existen en esta compañía y no se han procesado
+        if field_name not in company_field_names or field_name in processed_fields:
             continue
             
         target_type = conflict_info['consensus_type']
@@ -259,6 +261,7 @@ def generate_silver_view_sql(table_analysis, company_result):
         # SIEMPRE aplicar cast para asegurar consistencia de tipos
         cast_expression = generate_cast_for_field(field_name, source_type, target_type)
         silver_fields.append(f"    {cast_expression} as {field_name}")
+        processed_fields.add(field_name)
     
     # 3. Procesar campos faltantes (con valores por defecto)
     # IMPORTANTE: Mantener layout consistente para UNION ALL

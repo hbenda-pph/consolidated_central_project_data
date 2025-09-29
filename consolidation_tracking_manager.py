@@ -68,21 +68,29 @@ class ConsolidationTrackingManager:
             
             if existing.empty:
                 # Insertar nuevo registro
+                # Escapar comillas en strings para SQL
+                safe_error_message = error_message.replace("'", "''") if error_message else None
+                safe_notes = notes.replace("'", "''") if notes else None
+                
                 insert_query = f"""
                 INSERT INTO `{self.table_id}` 
                 (company_id, table_name, consolidated_status, created_at, updated_at, error_message, notes)
                 VALUES ({company_id}, '{table_name}', {status}, CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP(), 
-                        {f"'{error_message}'" if error_message else 'NULL'}, 
-                        {f"'{notes}'" if notes else 'NULL'})
+                        {f"'{safe_error_message}'" if safe_error_message else 'NULL'}, 
+                        {f"'{safe_notes}'" if safe_notes else 'NULL'})
                 """
             else:
                 # Actualizar registro existente
+                # Escapar comillas en strings para SQL
+                safe_error_message = error_message.replace("'", "''") if error_message else None
+                safe_notes = notes.replace("'", "''") if notes else None
+                
                 update_query = f"""
                 UPDATE `{self.table_id}`
                 SET consolidated_status = {status},
                     updated_at = CURRENT_TIMESTAMP(),
-                    error_message = {f"'{error_message}'" if error_message else 'NULL'},
-                    notes = {f"'{notes}'" if notes else 'NULL'}
+                    error_message = {f"'{safe_error_message}'" if safe_error_message else 'NULL'},
+                    notes = {f"'{safe_notes}'" if safe_notes else 'NULL'}
                 WHERE company_id = {company_id} AND table_name = '{table_name}'
                 """
                 insert_query = update_query
