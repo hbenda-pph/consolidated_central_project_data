@@ -17,8 +17,6 @@ def create_bigquery_client():
     try:
         return bigquery.Client(project=PROJECT_SOURCE)
     except Exception as e:
-        print(f"⚠️  Error creando cliente BigQuery: {str(e)}")
-        print("🔄 Reintentando conexión...")
         import time
         time.sleep(5)  # Esperar 5 segundos
         return bigquery.Client(project=PROJECT_SOURCE)
@@ -46,10 +44,8 @@ def analyze_table_fields_across_companies(table_name):
         companies_df = client.query(companies_query).to_dataframe()
         
         if companies_df.empty:
-            print(f"⚠️  No se encontraron compañías activas para {table_name}")
             return None
         
-        print(f"📋 Analizando {table_name} en {len(companies_df)} compañías")
         
         # Analizar campos en cada compañía
         table_analysis_results = []
@@ -98,16 +94,10 @@ def analyze_table_fields_across_companies(table_name):
                             field_types[field_name] = []
                         field_types[field_name].append(field_type)
                     
-                    print(f"  ✅ {company_name}: {len(company_fields)} campos")
-                else:
-                    print(f"  ⚠️  {company_name}: Tabla no encontrada")
-                    
             except Exception as e:
-                print(f"  ❌ Error analizando {company_name}: {str(e)}")
                 continue
         
         if not table_analysis_results:
-            print(f"⚠️  No se encontraron datos para {table_name}")
             return None
         
         # Analizar consenso de campos y tipos
@@ -150,7 +140,6 @@ def analyze_table_fields_across_companies(table_name):
         }
         
     except Exception as e:
-        print(f"❌ Error analizando tabla {table_name}: {str(e)}")
         return None
 
 def determine_consensus_type(types_list):
@@ -301,7 +290,6 @@ def generate_silver_view_sql(table_analysis, company_result):
     
     # Validar que hay campos para procesar
     if not silver_fields:
-        print(f"  ⚠️  No hay campos para procesar en {company_name} - {table_name}")
         return None
     
     # Agregar comas entre campos (excepto el último)
@@ -332,7 +320,6 @@ def generate_all_silver_views(force_recreate=True):
     """
     Genera vistas Silver para todas las tablas identificadas (VERSIÓN JOB - NO INTERACTIVO)
     """
-    print("🚀 Iniciando generación de vistas Silver para todas las tablas")
     
     # Inicializar gestores
     status_manager = ConsolidationStatusManager()
@@ -340,7 +327,6 @@ def generate_all_silver_views(force_recreate=True):
     
     # En modo job, usar TODAS las compañías (force_recreate=True)
     if force_recreate:
-        print("🔄 MODO JOB: Procesando TODAS las compañías activas")
         try:
             # Obtener todas las compañías activas
             all_companies_query = f"""
@@ -357,21 +343,16 @@ def generate_all_silver_views(force_recreate=True):
             client = create_bigquery_client()
             pending_companies = client.query(all_companies_query).to_dataframe()
         except Exception as e:
-            print(f"⚠️  Error obteniendo compañías: {str(e)}")
             return {}, {}
     else:
         # Obtener compañías pendientes de consolidación
         try:
             pending_companies = status_manager.get_companies_by_status(0)
             if pending_companies.empty:
-                print("ℹ️  No hay compañías pendientes de consolidación")
                 return {}, {}
         except Exception as e:
-            print(f"⚠️  Error obteniendo compañías pendientes: {str(e)}")
-            print("ℹ️  No hay compañías pendientes de consolidación")
             return {}, {}
     
-    print(f"📋 Compañías a procesar: {len(pending_companies)}")
     
     # Usar configuración centralizada
     all_tables = TABLES_TO_PROCESS
@@ -383,30 +364,19 @@ def generate_all_silver_views(force_recreate=True):
     output_dir = f"{OUTPUT_BASE_DIR}/silver_views_{timestamp}"
     os.makedirs(output_dir, exist_ok=True)
     
-    print(f"🚀 INICIANDO GENERACIÓN DE VISTAS SILVER")
-    print(f"📁 Directorio de salida: {output_dir}")
-    print(f"📋 Tablas a procesar: {len(all_tables)}")
-    print("=" * 80)
     
     for table_name in all_tables:
-        print(f"\n🔄 Procesando tabla: {table_name}")
         
         # En modo job, mostrar estado pero NO saltar tablas
         completion_status = tracking_manager.get_table_completion_status(table_name)
         
-        print(f"  📊 Estado actual: {completion_status['completion_rate']:.1f}% completada")
-        print(f"     ✅ Éxitos: {completion_status['success_count']}")
-        print(f"     ❌ Errores: {completion_status['error_count']}")
-        print(f"     ⚠️  No existe: {completion_status['missing_count']}")
         
         # En modo job, procesar TODAS las tablas sin importar el estado
-        print(f"  🔄 MODO JOB: Procesando sin importar estado de consolidación")
         
         # Analizar campos de la tabla
         table_analysis = analyze_table_fields_across_companies(table_name)
         
         if table_analysis is None:
-            print(f"  ⏭️  Saltando tabla '{table_name}' - no se encontraron datos")
             # Registrar estado 0 para todas las compañías (tabla no existe)
             for _, company in pending_companies.iterrows():
                 tracking_manager.update_status(
@@ -444,7 +414,6 @@ def generate_all_silver_views(force_recreate=True):
             
             # Validar que se generó SQL válido
             if sql_content is None:
-                print(f"    ⚠️  No se pudo generar SQL para {company_name}")
                 tracking_manager.update_status(
                     company_id=company_result['company_id'],
                     table_name=table_name,
@@ -459,7 +428,6 @@ def generate_all_silver_views(force_recreate=True):
             for attempt in range(max_retries):
                 try:
                     if attempt > 0:
-                        print(f"    🔄 Reintento {attempt + 1}/{max_retries} para {company_name}")
                         # Recrear cliente en caso de error de autenticación
                         client = create_bigquery_client()
                         import time
@@ -467,8 +435,6 @@ def generate_all_silver_views(force_recreate=True):
                     
                     query_job = client.query(sql_content)
                     query_job.result()  # Esperar a que termine
-                    
-                    print(f"    ✅ Vista Silver creada: {company_name}")
                     
                     # Registrar éxito
                     tracking_manager.update_status(
@@ -488,15 +454,13 @@ def generate_all_silver_views(force_recreate=True):
                     
                 except Exception as e:
                     if attempt == max_retries - 1:
-                        print(f"    ❌ Error creando vista {company_name}: {str(e)}")
                         tracking_manager.update_status(
                             company_id=company_result['company_id'],
                             table_name=table_name,
                             status=2,
                             notes=f"Error: {str(e)}"
                         )
-        else:
-                        print(f"    ⚠️  Error en intento {attempt + 1}: {str(e)}")
+                    continue
         
         # Guardar resultados
         all_results[table_name] = {
@@ -504,10 +468,6 @@ def generate_all_silver_views(force_recreate=True):
             'sql_files': company_sql_files
         }
         
-        print(f"  📊 Resumen {table_name}:")
-        print(f"     📁 Archivos SQL: {len(company_sql_files)}")
-        print(f"     🔍 Campos comunes: {len(table_analysis['field_consensus'])}")
-        print(f"     ⚠️  Conflictos de tipo: {len(table_analysis['type_conflicts'])}")
     
     # Generar resumen final
     summary_filename = f"{output_dir}/generation_summary.md"
@@ -531,24 +491,12 @@ def generate_all_silver_views(force_recreate=True):
         
         if completion_status['is_fully_consolidated']:
             skipped_count += 1
-            print(f"  ⏭️  {table_name}: SALTADA - 100% consolidada")
         else:
             processed_count += 1
-            print(f"  🔄 {table_name}: RECREADA - {completion_status['completion_rate']:.1f}% completada")
     
-    print(f"\n🎯 GENERACIÓN COMPLETADA")
-    print(f"📁 Directorio: {output_dir}")
-    print(f"📊 Tablas procesadas: {processed_count}")
-    print(f"⏭️  Tablas saltadas: {skipped_count}")
-    print(f"📄 Resumen: {summary_filename}")
-    print(f"📊 Tracking: Tabla companies_consolidated actualizada")
     
     return all_results, output_dir
 
 if __name__ == "__main__":
     # Ejecutar generación (VERSIÓN JOB - SIN INTERACCIÓN)
-    print("🚀 GENERATE SILVER VIEWS JOB - INICIANDO")
-    print("🔄 MODO FORZADO: Procesando TODAS las compañías y tablas")
     results, output_dir = generate_all_silver_views(force_recreate=True)
-    print(f"\n✅ JOB COMPLETADO EXITOSAMENTE!")
-    print(f"📁 Revisa los archivos en: {output_dir}")
