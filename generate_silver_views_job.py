@@ -342,7 +342,12 @@ def generate_all_silver_views(force_recreate=True):
             """
             client = create_bigquery_client()
             pending_companies = client.query(all_companies_query).to_dataframe()
+            print(f"COMPAÑÍAS ENCONTRADAS: {len(pending_companies)}")
+            if len(pending_companies) == 0:
+                print("ERROR: No se encontraron compañías activas")
+                return {}, {}
         except Exception as e:
+            print(f"ERROR obteniendo compañías: {str(e)}")
             return {}, {}
     else:
         # Obtener compañías pendientes de consolidación
@@ -356,6 +361,7 @@ def generate_all_silver_views(force_recreate=True):
     
     # Usar configuración centralizada
     all_tables = TABLES_TO_PROCESS
+    print(f"TABLAS A PROCESAR: {len(all_tables)}")
     
     all_results = {}
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -364,9 +370,10 @@ def generate_all_silver_views(force_recreate=True):
     output_dir = f"{OUTPUT_BASE_DIR}/silver_views_{timestamp}"
     os.makedirs(output_dir, exist_ok=True)
     
-    
+    processed_count = 0
     for table_name in all_tables:
-        print(f"\n🔄 Procesando tabla: {table_name}")
+        processed_count += 1
+        print(f"PROCESANDO TABLA {processed_count}/{len(all_tables)}: {table_name}")
         
         # En modo job, mostrar estado pero NO saltar tablas
         completion_status = tracking_manager.get_table_completion_status(table_name)
@@ -496,11 +503,14 @@ def generate_all_silver_views(force_recreate=True):
             processed_count += 1
     
     
+    print(f"PROCESO COMPLETADO: {len(all_results)} tablas procesadas")
     return all_results, output_dir
 
 if __name__ == "__main__":
+    print("INICIANDO GENERATE SILVER VIEWS JOB")
     # Ejecutar generación (VERSIÓN JOB - SIN INTERACCIÓN)
     results, output_dir = generate_all_silver_views(force_recreate=True)
+    print("JOB TERMINADO")
 
     print(f"\n✅ Script completado exitosamente!")
     print(f"📁 Revisa los archivos en: {output_dir}")    
