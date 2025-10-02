@@ -24,8 +24,8 @@ echo "   Service Account: ${SERVICE_ACCOUNT}"
 echo ""
 
 # Verificar que estamos en el directorio correcto
-if [ ! -f "generate_silver_views.py" ]; then
-    echo "❌ Error: generate_silver_views.py no encontrado. Ejecuta este script desde el directorio consolidated_central_project_data/"
+if [ ! -f "generate_silver_views_job.py" ]; then
+    echo "❌ Error: generate_silver_views_job.py no encontrado. Ejecuta este script desde el directorio consolidated_central_project_data/"
     exit 1
 fi
 
@@ -92,26 +92,14 @@ else
 fi
 
 echo ""
-echo "▶️  PASO 3: EJECUTAR JOB"
-echo "========================="
-gcloud run jobs execute ${JOB_NAME} --region=${REGION} --wait
-
-if [ $? -eq 0 ]; then
-    echo "✅ Job ejecutado exitosamente!"
-else
-    echo "❌ Error ejecutando job"
-    exit 1
-fi
-
-echo ""
-echo "🎉 ¡PROCESO COMPLETADO EXITOSAMENTE!"
+echo "🎉 ¡DEPLOY COMPLETADO EXITOSAMENTE!"
 echo "===================================="
 echo ""
-echo "📊 Para ver logs del job:"
-echo "   gcloud run jobs logs ${JOB_NAME} --region=${REGION}"
+echo "📊 Para ejecutar el job:"
+echo "   gcloud run jobs execute ${JOB_NAME} --region=${REGION}"
 echo ""
-echo "🔧 Para ver estado del job:"
-echo "   gcloud run jobs describe ${JOB_NAME} --region=${REGION}"
+echo "🔧 Para ver logs del job:"
+echo "   gcloud run jobs logs ${JOB_NAME} --region=${REGION}"
 echo ""
 echo "🛑 Para eliminar el job:"
 echo "   gcloud run jobs delete ${JOB_NAME} --region=${REGION}"
