@@ -64,7 +64,9 @@ class ConsolidationTrackingManager:
             LIMIT 1
             """
             
-            existing = self.client.query(query).to_dataframe()
+            query_job = self.client.query(query)
+            results = query_job.result()
+            existing = pd.DataFrame([dict(row) for row in results])
             
             if existing.empty:
                 # Insertar nuevo registro
@@ -126,7 +128,9 @@ class ConsolidationTrackingManager:
             GROUP BY consolidated_status
             """
             
-            df = self.client.query(query).to_dataframe()
+            query_job = self.client.query(query)
+            results = query_job.result()
+            df = pd.DataFrame([dict(row) for row in results])
             
             if df.empty:
                 return {
@@ -207,7 +211,9 @@ class ConsolidationTrackingManager:
             LIMIT 1
             """
             
-            df = self.client.query(query).to_dataframe()
+            query_job = self.client.query(query)
+            results = query_job.result()
+            df = pd.DataFrame([dict(row) for row in results])
             
             if df.empty:
                 return None
@@ -240,7 +246,9 @@ class ConsolidationTrackingManager:
             ORDER BY table_name, consolidated_status
             """
             
-            df = self.client.query(query).to_dataframe()
+            query_job = self.client.query(query)
+            results = query_job.result()
+            df = pd.DataFrame([dict(row) for row in results])
             
             if df.empty:
                 print("📊 No hay datos de consolidación disponibles")

@@ -41,7 +41,9 @@ def analyze_table_fields_across_companies(table_name):
         ORDER BY company_id
         """
         
-        companies_df = client.query(companies_query).to_dataframe()
+        query_job = client.query(companies_query)
+        results = query_job.result()
+        companies_df = pd.DataFrame([dict(row) for row in results])
         
         if companies_df.empty:
             return None
@@ -73,7 +75,9 @@ def analyze_table_fields_across_companies(table_name):
                 ORDER BY ordinal_position
                 """
                 
-                fields_df = client.query(fields_query).to_dataframe()
+                query_job = client.query(fields_query)
+                results = query_job.result()
+                fields_df = pd.DataFrame([dict(row) for row in results])
                 
                 if not fields_df.empty:
                     company_fields = {row['column_name']: row['data_type'] for _, row in fields_df.iterrows()}
@@ -328,7 +332,7 @@ def generate_all_silver_views(force_recreate=True):
     # En modo job, usar TODAS las compañías (force_recreate=True)
     if force_recreate:
         try:
-            # Obtener todas las compañías activas
+            # Obtener todas las compañías activas (igual que el script manual)
             all_companies_query = f"""
             SELECT 
                 company_id,
@@ -341,7 +345,9 @@ def generate_all_silver_views(force_recreate=True):
             ORDER BY company_id
             """
             client = create_bigquery_client()
-            pending_companies = client.query(all_companies_query).to_dataframe()
+            query_job = client.query(all_companies_query)
+            results = query_job.result()
+            pending_companies = pd.DataFrame([dict(row) for row in results])
             print(f"COMPAÑÍAS ENCONTRADAS: {len(pending_companies)}")
             if len(pending_companies) == 0:
                 print("ERROR: No se encontraron compañías activas")
@@ -459,8 +465,8 @@ def generate_all_silver_views(force_recreate=True):
                     company_sql_files.append(filename)
                     
                     break  # Salir del loop de reintentos si fue exitoso
-                    
-                except Exception as e:
+        
+    except Exception as e:
                     if attempt == max_retries - 1:
                         tracking_manager.update_status(
                             company_id=company_result['company_id'],
