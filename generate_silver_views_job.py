@@ -366,6 +366,7 @@ def generate_all_silver_views(force_recreate=True):
     
     
     for table_name in all_tables:
+        print(f"\n🔄 Procesando tabla: {table_name}")
         
         # En modo job, mostrar estado pero NO saltar tablas
         completion_status = tracking_manager.get_table_completion_status(table_name)
@@ -500,3 +501,6 @@ def generate_all_silver_views(force_recreate=True):
 if __name__ == "__main__":
     # Ejecutar generación (VERSIÓN JOB - SIN INTERACCIÓN)
     results, output_dir = generate_all_silver_views(force_recreate=True)
+
+    print(f"\n✅ Script completado exitosamente!")
+    print(f"📁 Revisa los archivos en: {output_dir}")    
