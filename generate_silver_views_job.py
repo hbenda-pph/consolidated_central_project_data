@@ -365,8 +365,8 @@ def generate_all_silver_views(force_recreate=True):
             return {}, {}
     
     
-    # Usar configuración centralizada
-    all_tables = TABLES_TO_PROCESS
+    # Usar configuración centralizada con filtro discreto
+    all_tables = [table for table in TABLES_TO_PROCESS if table >= 'i']
     print(f"TABLAS A PROCESAR: {len(all_tables)}")
     
     all_results = {}
