@@ -1,5 +1,5 @@
 """
-Script para crear tablas consolidadas en central-bronze
+Script para crear tablas consolidadas en pph-central.bronze
 Con particionado y clusterizado basado en metadatos
 """
 
@@ -43,7 +43,10 @@ class ConsolidatedTableCreator:
             ORDER BY cc.company_id
             """
             
-            df = self.client.query(query).to_dataframe()
+            # Usar pd.DataFrame para evitar error de permisos
+            query_job = self.client.query(query)
+            results = query_job.result()
+            df = pd.DataFrame([dict(row) for row in results])
             
             companies = []
             for _, row in df.iterrows():
@@ -87,9 +90,10 @@ class ConsolidatedTableCreator:
         # 4. Ejecutar creación de tabla
         try:
             print(f"  🔄 Ejecutando creación de tabla...")
+            print(f"  📝 SQL: {create_sql[:200]}...")
             query_job = self.client.query(create_sql)
             query_job.result()
-            print(f"  ✅ Tabla consolidada creada: {self.central_bronze_dataset}.{table_name}")
+            print(f"  ✅ Tabla consolidada creada: {self.central_bronze_dataset}.consolidated_{table_name}")
             return True
             
         except Exception as e:
@@ -133,7 +137,7 @@ class ConsolidatedTableCreator:
         
         # SQL completo
         sql = f"""
-        CREATE OR REPLACE TABLE `{self.central_bronze_dataset}.{table_name}`
+        CREATE OR REPLACE TABLE `{self.central_bronze_dataset}.consolidated_{table_name}`
         PARTITION BY DATE({partition_field})
         {cluster_sql}
         AS

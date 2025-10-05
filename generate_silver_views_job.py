@@ -181,12 +181,15 @@ def generate_cast_for_field(field_name, source_type, target_type):
         return field_name
     
     # Mapeo de conversiones seguras
+    # REGLA CRÍTICA: SIEMPRE priorizar STRING cuando hay conflicto
     safe_casts = {
         ('INT64', 'STRING'): f"CAST({field_name} AS STRING)",
         ('INT64', 'FLOAT64'): f"CAST({field_name} AS FLOAT64)",
         ('FLOAT64', 'STRING'): f"CAST({field_name} AS STRING)",
-        ('STRING', 'INT64'): f"SAFE_CAST({field_name} AS INT64)",
-        ('STRING', 'FLOAT64'): f"SAFE_CAST({field_name} AS FLOAT64)",
+        # 🚨 CORREGIDO: STRING a INT64/FLOAT64 NO es seguro si contiene letras
+        # SIEMPRE convertir a STRING para evitar errores
+        ('STRING', 'INT64'): f"CAST({field_name} AS STRING)",  # Mantener como STRING
+        ('STRING', 'FLOAT64'): f"CAST({field_name} AS STRING)",  # Mantener como STRING
         ('STRING', 'BOOL'): f"SAFE_CAST({field_name} AS BOOL)",
         ('BOOL', 'STRING'): f"CAST({field_name} AS STRING)",
         ('DATE', 'STRING'): f"CAST({field_name} AS STRING)",
@@ -194,8 +197,9 @@ def generate_cast_for_field(field_name, source_type, target_type):
         ('TIMESTAMP', 'STRING'): f"CAST({field_name} AS STRING)",
         # JSON a otros tipos - usar TO_JSON_STRING para convertir a STRING
         ('JSON', 'STRING'): f"COALESCE(TO_JSON_STRING({field_name}), '')",
-        ('JSON', 'INT64'): f"COALESCE(SAFE_CAST(TO_JSON_STRING({field_name}) AS INT64), 0)",
-        ('JSON', 'FLOAT64'): f"COALESCE(SAFE_CAST(TO_JSON_STRING({field_name}) AS FLOAT64), 0.0)"
+        # 🚨 CORREGIDO: JSON a INT64/FLOAT64 también debe ir a STRING
+        ('JSON', 'INT64'): f"COALESCE(TO_JSON_STRING({field_name}), '')",  # A STRING
+        ('JSON', 'FLOAT64'): f"COALESCE(TO_JSON_STRING({field_name}), '')"  # A STRING
     }
     
     cast_key = (source_type, target_type)
