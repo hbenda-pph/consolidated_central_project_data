@@ -271,7 +271,9 @@ class ConsolidationStatusManager:
                 {limit_clause}
             """
             
-            result = self.client.query(query).result()
+            self.logger.info(f"🔄 Ejecutando consulta: {query}")
+            query_job = self.client.query(query)
+            result = query_job.result()
             companies_df = pd.DataFrame([dict(row) for row in result])
             
             self.logger.info(f"📋 Compañías pendientes obtenidas: {len(companies_df)}")

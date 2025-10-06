@@ -363,12 +363,14 @@ def generate_all_silver_views(force_recreate=True):
             print(f"ERROR obteniendo compañías: {str(e)}")
             return {}, {}
     else:
-        # Obtener compañías pendientes de consolidación
+        # Obtener TODAS las compañías activas (sin filtro de status)
         try:
-            pending_companies = status_manager.get_companies_by_status(0)
+            pending_companies = status_manager.get_companies_for_consolidation()
             if pending_companies.empty:
+                print("ℹ️  No hay compañías para procesar")
                 return {}, {}
         except Exception as e:
+            print(f"❌ Error obteniendo compañías: {str(e)}")
             return {}, {}
     
     
@@ -472,7 +474,7 @@ def generate_all_silver_views(force_recreate=True):
                     company_sql_files.append(filename)
                     
                     break  # Salir del loop de reintentos si fue exitoso
-                except Exception as e:
+    except Exception as e:
                     if attempt == max_retries - 1:
                         tracking_manager.update_status(
                             company_id=company_result['company_id'],
