@@ -474,7 +474,7 @@ def generate_all_silver_views(force_recreate=True):
                     company_sql_files.append(filename)
                     
                     break  # Salir del loop de reintentos si fue exitoso
-    except Exception as e:
+                except Exception as e:
                     if attempt == max_retries - 1:
                         tracking_manager.update_status(
                             company_id=company_result['company_id'],
