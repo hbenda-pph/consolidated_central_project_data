@@ -195,6 +195,9 @@ def generate_cast_for_field(field_name, source_type, target_type):
         ('DATE', 'STRING'): f"CAST({field_name} AS STRING)",
         ('DATETIME', 'STRING'): f"CAST({field_name} AS STRING)",
         ('TIMESTAMP', 'STRING'): f"CAST({field_name} AS STRING)",
+        # 🚨 CRÍTICO: TIMESTAMP vs INT64 - SIEMPRE a TIMESTAMP
+        ('INT64', 'TIMESTAMP'): f"TIMESTAMP_SECONDS({field_name})",
+        ('TIMESTAMP', 'INT64'): f"UNIX_SECONDS({field_name})",
         # JSON a otros tipos - usar TO_JSON_STRING para convertir a STRING
         ('JSON', 'STRING'): f"COALESCE(TO_JSON_STRING({field_name}), '')",
         # 🚨 CORREGIDO: JSON a INT64/FLOAT64 también debe ir a STRING
@@ -369,8 +372,8 @@ def generate_all_silver_views(force_recreate=True):
             return {}, {}
     
     
-    # Usar configuración centralizada con filtro discreto
-    all_tables = [table for table in TABLES_TO_PROCESS if table >= 'i']
+    # Usar configuración centralizada - PROCESAR TODAS LAS TABLAS
+    all_tables = TABLES_TO_PROCESS
     print(f"TABLAS A PROCESAR: {len(all_tables)}")
     
     all_results = {}
@@ -469,8 +472,8 @@ def generate_all_silver_views(force_recreate=True):
                     company_sql_files.append(filename)
                     
                     break  # Salir del loop de reintentos si fue exitoso
-                    
-                except Exception as e:
+        
+    except Exception as e:
                     if attempt == max_retries - 1:
                         tracking_manager.update_status(
                             company_id=company_result['company_id'],

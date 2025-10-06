@@ -418,6 +418,9 @@ def generate_cast_for_field(field_name, source_type, target_type):
         ('DATE', 'STRING'): f"CAST({field_name} AS STRING)",
         ('DATETIME', 'STRING'): f"CAST({field_name} AS STRING)",
         ('TIMESTAMP', 'STRING'): f"CAST({field_name} AS STRING)",
+        # 🚨 CRÍTICO: TIMESTAMP vs INT64 - SIEMPRE a TIMESTAMP
+        ('INT64', 'TIMESTAMP'): f"TIMESTAMP_SECONDS({field_name})",
+        ('TIMESTAMP', 'INT64'): f"UNIX_SECONDS({field_name})",
         # JSON a otros tipos - usar TO_JSON_STRING para convertir a STRING
         ('JSON', 'STRING'): f"COALESCE(TO_JSON_STRING({field_name}), '')",
         # 🚨 CORREGIDO: JSON a INT64/FLOAT64 también debe ir a STRING
