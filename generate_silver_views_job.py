@@ -363,11 +363,11 @@ def generate_all_silver_views(force_recreate=True):
             print(f"ERROR obteniendo compañías: {str(e)}")
             return {}, {}
     else:
-        # Obtener TODAS las compañías activas (sin filtro de status)
+        # Obtener compañías activas (modo original que funcionaba)
         try:
-            pending_companies = status_manager.get_companies_for_consolidation()
+            pending_companies = status_manager.get_companies_by_status(0)
             if pending_companies.empty:
-                print("ℹ️  No hay compañías para procesar")
+                print("ℹ️  No hay compañías pendientes de consolidación")
                 return {}, {}
         except Exception as e:
             print(f"❌ Error obteniendo compañías: {str(e)}")
