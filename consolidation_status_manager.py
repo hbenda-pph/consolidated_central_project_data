@@ -36,6 +36,15 @@ class ConsolidationStatusManager:
         }
         
         self.logger.info("📊 ConsolidationStatusManager iniciado")
+        self.logger.info(f"📋 Tabla companies: {self.companies_table}")
+        
+        # Verificar que la tabla existe
+        try:
+            table = self.client.get_table(self.companies_table)
+            self.logger.info(f"✅ Tabla companies encontrada: {len(table.schema)} campos")
+        except Exception as e:
+            self.logger.error(f"❌ Tabla companies NO encontrada: {str(e)}")
+            raise
     
     def setup_logging(self):
         """Configura el sistema de logging"""
@@ -139,8 +148,16 @@ class ConsolidationStatusManager:
                 ORDER BY company_id
             """
             
-            result = self.client.query(query).result()
+            self.logger.info(f"🔄 Ejecutando consulta: {query}")
+            self.logger.info(f"📊 Tabla: {self.companies_table}")
+            query_job = self.client.query(query)
+            self.logger.info(f"📋 Job creado: {query_job.job_id}")
+            
+            result = query_job.result()
+            self.logger.info(f"✅ Consulta completada, procesando resultados...")
+            
             companies_df = pd.DataFrame([dict(row) for row in result])
+            self.logger.info(f"📊 DataFrame creado con {len(companies_df)} filas")
             
             status_name = {v: k for k, v in self.STATUS.items()}[status]
             self.logger.info(f"📋 Compañías con estado {status_name} ({status}): {len(companies_df)}")

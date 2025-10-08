@@ -1,205 +1,202 @@
+# -*- coding: utf-8 -*-
 """
-Script para generar vistas Silver por compañía (VERSIÓN JOB - NO INTERACTIVO)
-Genera vistas normalizadas para cada compañía con manejo de diferencias de esquemas
+Generate Silver Views for All Tables - CLOUD RUN JOB VERSION
+Este script genera automáticamente las vistas Silver para todas las tablas
+basándose en el análisis de campos comunes y únicos entre compañías.
+
+VERSIÓN PARA CLOUD RUN JOB:
+- Sin prompts interactivos
+- Modo forzado activado por defecto
+- Procesa TODAS las tablas y compañías
 """
 
 from google.cloud import bigquery
 import pandas as pd
+import numpy as np
+import time
 from datetime import datetime
+import warnings
+from collections import defaultdict, Counter
 import os
-import sys
-from config import PROJECT_SOURCE, TABLES_TO_PROCESS, OUTPUT_BASE_DIR
+warnings.filterwarnings('ignore')
+
+# Importar configuración centralizada
+from config import *
 from consolidation_status_manager import ConsolidationStatusManager
 from consolidation_tracking_manager import ConsolidationTrackingManager
 
+# Crear cliente BigQuery con reconexión automática
 def create_bigquery_client():
     """Crea cliente BigQuery con manejo de reconexión"""
     try:
         return bigquery.Client(project=PROJECT_SOURCE)
     except Exception as e:
-        import time
+        print(f"⚠️  Error creando cliente BigQuery: {str(e)}")
+        print("🔄 Reintentando conexión...")
         time.sleep(5)  # Esperar 5 segundos
         return bigquery.Client(project=PROJECT_SOURCE)
 
-def analyze_table_fields_across_companies(table_name):
-    """
-    Analiza campos de una tabla específica en todas las compañías
-    """
+try:
     client = create_bigquery_client()
-    
-    try:
-        # Obtener todas las compañías activas
-        companies_query = f"""
-        SELECT 
+    print(f"✅ Cliente BigQuery creado exitosamente para proyecto: {PROJECT_SOURCE}")
+except Exception as e:
+    print(f"❌ Error al crear cliente BigQuery: {str(e)}")
+    raise
+
+def get_companies_info():
+    """
+    Obtiene información de las compañías desde la tabla companies
+    """
+    query = f"""
+        SELECT
             company_id,
             company_name,
-            company_project_id
-        FROM `{PROJECT_SOURCE}.settings.companies`
-        WHERE company_fivetran_status = TRUE 
+            company_new_name,
+            company_project_id,
+            company_bigquery_status,
+            company_consolidated_status
+        FROM `{PROJECT_SOURCE}.{DATASET_NAME}.{TABLE_NAME}`
+        WHERE company_fivetran_status = TRUE
           AND company_bigquery_status = TRUE
-          AND company_project_id IS NOT NULL
         ORDER BY company_id
-        """
-        
-        query_job = client.query(companies_query)
+    """
+
+    try:
+        query_job = client.query(query)
         results = query_job.result()
         companies_df = pd.DataFrame([dict(row) for row in results])
-        
-        if companies_df.empty:
-            return None
-        
-        
-        # Analizar campos en cada compañía
-        table_analysis_results = []
-        all_fields = set()
-        field_types = {}
-        
-        for _, company in companies_df.iterrows():
-            company_id = company['company_id']
-            company_name = company['company_name']
-            project_id = company['company_project_id']
-            
-            # Construir nombre del dataset
-            dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
-            
-            try:
-                # Obtener campos de la tabla
-                fields_query = f"""
-                SELECT 
-                    column_name,
-                    data_type,
-                    is_nullable
-                FROM `{project_id}.{dataset_name}.INFORMATION_SCHEMA.COLUMNS`
-                WHERE table_name = '{table_name}'
-                  AND column_name NOT LIKE '_fivetran%'
-                ORDER BY ordinal_position
-                """
-                
-                query_job = client.query(fields_query)
-                results = query_job.result()
-                fields_df = pd.DataFrame([dict(row) for row in results])
-                
-                if not fields_df.empty:
-                    company_fields = {row['column_name']: row['data_type'] for _, row in fields_df.iterrows()}
-                    
-                    table_analysis_results.append({
-                        'company_id': company_id,
-                        'company_name': company_name,
-                        'project_id': project_id,
-                        'fields_df': fields_df,
-                        'company_fields': company_fields
-                    })
-                    
-                    all_fields.update(company_fields.keys())
-                    
-                    # Recopilar tipos por campo
-                    for field_name, field_type in company_fields.items():
-                        if field_name not in field_types:
-                            field_types[field_name] = []
-                        field_types[field_name].append(field_type)
-                    
-            except Exception as e:
-                continue
-        
-        if not table_analysis_results:
-            return None
-        
-        # Analizar consenso de campos y tipos
-        field_consensus = {}
-        type_conflicts = {}
-        
-        for field_name in all_fields:
-            field_occurrences = sum(1 for result in table_analysis_results 
-                                  if field_name in result['company_fields'])
-            
-            # Si el campo existe en más del 80% de las compañías, considerarlo común
-            if field_occurrences >= len(table_analysis_results) * 0.8:
-                field_types_list = field_types[field_name]
-                
-                # Determinar tipo consenso
-                consensus_type = determine_consensus_type(field_types_list)
-                
-                if len(set(field_types_list)) == 1:
-                    # Todos los tipos son iguales
-                    field_consensus[field_name] = {
-                        'type': consensus_type,
-                        'occurrences': field_occurrences
-                    }
-        else:
-                    # Hay conflictos de tipo
-                    type_conflicts[field_name] = {
-                        'consensus_type': consensus_type,
-                        'types_found': list(set(field_types_list)),
-                        'occurrences': field_occurrences
-                    }
-        
-        return {
-            'table_name': table_name,
-            'field_consensus': field_consensus,
-            'type_conflicts': type_conflicts,
-            'company_results': table_analysis_results,
-            'field_frequency': {field: sum(1 for result in table_analysis_results 
-                                         if field in result['company_fields']) 
-                              for field in all_fields}
-        }
-        
+        print(f"✅ Información de compañías obtenida: {len(companies_df)} registros")
+        return companies_df
     except Exception as e:
+        print(f"❌ Error al obtener información de compañías: {str(e)}")
+        raise
+
+def get_table_fields_with_types(project_id, table_name):
+    """
+    Obtiene información de campos con tipos de datos de una tabla específica
+    """
+    dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
+    try:
+        query = f"""
+            SELECT
+                table_catalog,
+                table_schema,
+                table_name,
+                column_name,
+                data_type,
+                is_nullable,
+                column_default,
+                ordinal_position
+            FROM `{project_id}.{dataset_name}.INFORMATION_SCHEMA.COLUMNS`
+            WHERE table_name = '{table_name}'
+            ORDER BY ordinal_position
+        """
+
+        query_job = client.query(query)
+        results = query_job.result()
+        fields_df = pd.DataFrame([dict(row) for row in results])
+        return fields_df
+    except Exception as e:
+        print(f"⚠️  Error al obtener campos de {project_id}.{dataset_name}.{table_name}: {str(e)}")
+        return pd.DataFrame()
+
+def analyze_table_fields_across_companies(table_name):
+    """
+    Analiza los campos de una tabla específica en todas las compañías
+    """
+    print(f"\n🔍 ANALIZANDO TABLA: {table_name}")
+    print("=" * 80)
+    
+    companies_df = get_companies_info()
+    table_analysis_results = []
+    all_table_fields = set()
+    
+    for idx, row in companies_df.iterrows():
+        company_id = row['company_id']
+        company_name = row['company_name']
+        project_id = row['company_project_id']
+        
+        if project_id is None:
+            continue
+        
+        # Obtener campos de la tabla
+        fields_df = get_table_fields_with_types(project_id, table_name)
+        
+        if fields_df.empty:
+            print(f"  ⚠️  {company_name}: Tabla '{table_name}' no encontrada")
+            continue
+            
+        # Filtrar campos _fivetran (campos del ETL que deben quedarse solo en Bronze)
+        filtered_fields_df = fields_df[~fields_df['column_name'].str.startswith('_fivetran')]
+        fields_list = filtered_fields_df['column_name'].tolist()
+        field_count = len(fields_list)
+        
+        # Guardar información
+        table_analysis_results.append({
+            'company_id': company_id,
+            'company_name': company_name,
+            'project_id': project_id,
+            'field_count': field_count,
+            'fields': fields_list,
+            'fields_df': filtered_fields_df
+        })
+        
+        all_table_fields.update(fields_list)
+    
+    if not table_analysis_results:
+        print(f"  ❌ No se encontraron datos para la tabla '{table_name}'")
         return None
-
-def determine_consensus_type(types_list):
-    """
-    Determina el tipo consenso: SI HAY DIFERENCIAS → STRING
-    """
-    # Si todos los tipos son iguales, usar ese tipo
-    unique_types = set(types_list)
     
-    if len(unique_types) == 1:
-        return list(unique_types)[0]
+    # Analizar campos comunes y únicos
+    field_frequency = Counter()
+    for result in table_analysis_results:
+        field_frequency.update(result['fields'])
     
-    # SI HAY CUALQUIER DIFERENCIA → STRING
-    return 'STRING'
-
-def generate_cast_for_field(field_name, source_type, target_type):
-    """
-    Genera la expresión CAST apropiada para un campo
-    REGLA SIMPLE: Cualquier tipo → STRING siempre es seguro
-    """
-    if source_type == target_type:
-        return field_name
+    # Determinar campos comunes (presentes en todas las compañías)
+    total_companies = len(table_analysis_results)
+    common_fields = []
+    partial_fields = []
     
-    # Si el target es STRING, SIEMPRE hacer CAST simple
-    if target_type == 'STRING':
-        # Casos especiales para tipos complejos
-        if source_type == 'JSON':
-            return f"COALESCE(TO_JSON_STRING({field_name}), '')"
-        elif source_type in ['STRUCT', 'ARRAY', 'RECORD']:
-            return f"COALESCE(TO_JSON_STRING({field_name}), '')"
+    for field, count in field_frequency.items():
+        if count == total_companies:
+            common_fields.append(field)
         else:
-            # Para todos los demás tipos, CAST simple a STRING
-            return f"CAST({field_name} AS STRING)"
+            partial_fields.append(field)
     
-    # Si el target NO es STRING pero el source SÍ es STRING, mantener como STRING
-    # (porque estamos en un escenario de conflicto y STRING es más seguro)
-    if source_type == 'STRING':
-        return f"CAST({field_name} AS STRING)"
+    # Analizar tipos de datos
+    print(f"\n🔍 ANALIZANDO TIPOS DE DATOS...")
+    field_consensus, type_conflicts = analyze_data_types_for_table(table_analysis_results)
     
-    # Para otros casos (mismo tipo o conversiones entre no-STRING)
-    return f"SAFE_CAST({field_name} AS {target_type})"
-
-def get_default_value_for_type(data_type):
-    """Obtiene el valor por defecto para un tipo de datos"""
-    defaults = {
-        'STRING': "''",
-        'INT64': '0',
-        'FLOAT64': '0.0',
-        'BOOL': 'FALSE',
-        'DATE': 'NULL',
-        'DATETIME': 'NULL',
-        'TIMESTAMP': 'NULL',
-        'JSON': 'NULL',
-        'BYTES': 'NULL'
+    print(f"\n📊 ANÁLISIS DE CAMPOS PARA '{table_name}':")
+    print(f"  Total de compañías con la tabla: {total_companies}")
+    print(f"  Total de campos únicos: {len(all_table_fields)}")
+    print(f"  Campos comunes: {len(common_fields)}")
+    print(f"  Campos parciales: {len(partial_fields)}")
+    print(f"  Campos sin conflicto de tipo: {len(field_consensus)}")
+    print(f"  Campos con conflicto de tipo: {len(type_conflicts)}")
+    
+    if partial_fields:
+        print(f"\n⚠️  CAMPOS PARCIALES:")
+        for field in partial_fields:
+            count = field_frequency[field]
+            print(f"    - {field}: {count}/{total_companies} compañías")
+    
+    if type_conflicts:
+        print(f"\n⚠️  CONFLICTOS DE TIPO:")
+        for field_name, conflict in type_conflicts.items():
+            print(f"    - {field_name}: {', '.join(conflict['types'])} → {conflict['consensus_type']}")
+    
+    return {
+        'table_name': table_name,
+        'total_companies': total_companies,
+        'all_fields': sorted(all_table_fields),
+        'common_fields': sorted(common_fields),
+        'partial_fields': sorted(partial_fields),
+        'field_consensus': field_consensus,
+        'type_conflicts': type_conflicts,
+        'company_results': table_analysis_results,
+        'field_frequency': field_frequency
     }
-    return defaults.get(data_type, 'NULL')
 
 def generate_silver_view_sql(table_analysis, company_result):
     """
@@ -275,6 +272,7 @@ def generate_silver_view_sql(table_analysis, company_result):
     
     # Validar que hay campos para procesar
     if not silver_fields:
+        print(f"  ⚠️  No hay campos para procesar en {company_name} - {table_name}")
         return None
     
     # Agregar comas entre campos (excepto el último)
@@ -301,56 +299,138 @@ FROM `{project_id}.{dataset_name}.{table_name}`
     
     return sql
 
-def generate_all_silver_views(force_recreate=True):
+# Funciones para análisis de tipos de datos
+def analyze_data_types_for_table(table_analysis_results):
     """
-    Genera vistas Silver para todas las tablas identificadas (VERSIÓN JOB - NO INTERACTIVO)
+    Analiza las diferencias de tipos de datos para una tabla
     """
+    field_type_analysis = defaultdict(list)
+    
+    # Recopilar información de tipos por campo
+    for result in table_analysis_results:
+        company_name = result['company_name']
+        project_id = result['project_id']
+        fields_df = result['fields_df']
+        
+        for _, field in fields_df.iterrows():
+            field_name = field['column_name']
+            data_type = field['data_type']
+            
+            field_type_analysis[field_name].append({
+                'company_name': company_name,
+                'project_id': project_id,
+                'data_type': data_type,
+                'is_nullable': field['is_nullable']
+            })
+    
+    # Analizar diferencias de tipos
+    type_conflicts = {}
+    field_consensus = {}
+    
+    for field_name, type_info_list in field_type_analysis.items():
+        unique_types = list(set([info['data_type'] for info in type_info_list]))
+        
+        if len(unique_types) > 1:
+            # Hay conflicto de tipos
+            type_conflicts[field_name] = {
+                'types': unique_types,
+                'companies': type_info_list,
+                'consensus_type': determine_consensus_type(unique_types, type_info_list)
+            }
+        else:
+            # No hay conflicto
+            field_consensus[field_name] = {
+                'type': unique_types[0],
+                'companies': type_info_list
+            }
+    
+    return field_consensus, type_conflicts
+
+def determine_consensus_type(types, type_info_list):
+    """
+    Determina el tipo consenso: SI HAY DIFERENCIAS → STRING
+    """
+    # Si todos los tipos son iguales, usar ese tipo
+    unique_types = set(types)
+    
+    if len(unique_types) == 1:
+        return list(unique_types)[0]
+    
+    # SI HAY CUALQUIER DIFERENCIA → STRING
+    return 'STRING'
+
+def generate_cast_for_field(field_name, source_type, target_type):
+    """
+    Genera la expresión CAST apropiada para un campo
+    REGLA SIMPLE: Cualquier tipo → STRING siempre es seguro
+    """
+    if source_type == target_type:
+        return field_name
+    
+    # Si el target es STRING, SIEMPRE hacer CAST simple
+    if target_type == 'STRING':
+        # Casos especiales para tipos complejos
+        if source_type == 'JSON':
+            return f"COALESCE(TO_JSON_STRING({field_name}), '')"
+        elif source_type in ['STRUCT', 'ARRAY', 'RECORD']:
+            return f"COALESCE(TO_JSON_STRING({field_name}), '')"
+        else:
+            # Para todos los demás tipos, CAST simple a STRING
+            return f"CAST({field_name} AS STRING)"
+    
+    # Si el target NO es STRING pero el source SÍ es STRING, mantener como STRING
+    # (porque estamos en un escenario de conflicto y STRING es más seguro)
+    if source_type == 'STRING':
+        return f"CAST({field_name} AS STRING)"
+    
+    # Para otros casos (mismo tipo o conversiones entre no-STRING)
+    return f"SAFE_CAST({field_name} AS {target_type})"
+
+def get_default_value_for_type(data_type):
+    """Obtiene el valor por defecto para un tipo de datos"""
+    defaults = {
+        'STRING': "''",
+        'INT64': '0',
+        'FLOAT64': '0.0',
+        'BOOL': 'FALSE',
+        'DATE': 'NULL',
+        'DATETIME': 'NULL',
+        'TIMESTAMP': 'NULL',
+        'JSON': 'NULL',
+        'BYTES': 'NULL'
+    }
+    return defaults.get(data_type, 'NULL')
+
+def generate_all_silver_views_job():
+    """
+    Genera vistas Silver para todas las tablas - VERSIÓN CLOUD RUN JOB
+    
+    FORZADO:
+    - Procesa TODAS las compañías activas
+    - Procesa TODAS las tablas
+    - No requiere confirmación
+    """
+    print("🚀 INICIANDO CLOUD RUN JOB - GENERACIÓN DE VISTAS SILVER")
+    print("⚙️  MODO: FORZADO - Procesando todas las compañías y tablas")
+    print("=" * 80)
     
     # Inicializar gestores
     status_manager = ConsolidationStatusManager()
     tracking_manager = ConsolidationTrackingManager()
     
-    # En modo job, usar TODAS las compañías (force_recreate=True)
-    if force_recreate:
-        try:
-            # Obtener todas las compañías activas (igual que el script manual)
-            all_companies_query = f"""
-            SELECT 
-                company_id,
-                company_name,
-                company_project_id
-            FROM `{PROJECT_SOURCE}.settings.companies`
-            WHERE company_fivetran_status = TRUE 
-              AND company_bigquery_status = TRUE
-              AND company_project_id IS NOT NULL
-            ORDER BY company_id
-            """
-            client = create_bigquery_client()
-            query_job = client.query(all_companies_query)
-            results = query_job.result()
-            pending_companies = pd.DataFrame([dict(row) for row in results])
-            print(f"COMPAÑÍAS ENCONTRADAS: {len(pending_companies)}")
-            if len(pending_companies) == 0:
-                print("ERROR: No se encontraron compañías activas")
-                return {}, {}
-        except Exception as e:
-            print(f"ERROR obteniendo compañías: {str(e)}")
-            return {}, {}
-    else:
-        # Obtener compañías activas (modo original que funcionaba)
-        try:
-            pending_companies = status_manager.get_companies_by_status(0)
-            if pending_companies.empty:
-                print("ℹ️  No hay compañías pendientes de consolidación")
-                return {}, {}
-        except Exception as e:
-            print(f"❌ Error obteniendo compañías: {str(e)}")
-            return {}, {}
+    # HARDCODED: Obtener TODAS las compañías activas (sin filtro de status)
+    print("📋 Obteniendo TODAS las compañías activas...")
+    companies_df = get_companies_info()
     
+    if companies_df.empty:
+        print("❌ No hay compañías activas para procesar")
+        return {}, {}
     
-    # Usar configuración centralizada - PROCESAR TODAS LAS TABLAS
+    print(f"✅ Compañías encontradas: {len(companies_df)}")
+    
+    # Usar TODAS las tablas de configuración
     all_tables = TABLES_TO_PROCESS
-    print(f"TABLAS A PROCESAR: {len(all_tables)}")
+    print(f"📋 Tablas a procesar: {len(all_tables)}")
     
     all_results = {}
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -359,23 +439,26 @@ def generate_all_silver_views(force_recreate=True):
     output_dir = f"{OUTPUT_BASE_DIR}/silver_views_{timestamp}"
     os.makedirs(output_dir, exist_ok=True)
     
-    processed_count = 0
+    print(f"📁 Directorio de salida: {output_dir}")
+    print("=" * 80)
+    
     for table_name in all_tables:
-        processed_count += 1
-        print(f"PROCESANDO TABLA {processed_count}/{len(all_tables)}: {table_name}")
+        print(f"\n🔄 Procesando tabla: {table_name}")
         
-        # En modo job, mostrar estado pero NO saltar tablas
+        # Mostrar estado actual (informativo, no bloquea ejecución)
         completion_status = tracking_manager.get_table_completion_status(table_name)
-        
-        
-        # En modo job, procesar TODAS las tablas sin importar el estado
+        print(f"  📊 Estado actual: {completion_status['completion_rate']:.1f}% completada")
+        print(f"     ✅ Éxitos: {completion_status['success_count']}")
+        print(f"     ❌ Errores: {completion_status['error_count']}")
+        print(f"     ⚠️  No existe: {completion_status['missing_count']}")
         
         # Analizar campos de la tabla
         table_analysis = analyze_table_fields_across_companies(table_name)
         
         if table_analysis is None:
+            print(f"  ⏭️  Saltando tabla '{table_name}' - no se encontraron datos")
             # Registrar estado 0 para todas las compañías (tabla no existe)
-            for _, company in pending_companies.iterrows():
+            for _, company in companies_df.iterrows():
                 tracking_manager.update_status(
                     company_id=company['company_id'],
                     table_name=table_name,
@@ -384,14 +467,15 @@ def generate_all_silver_views(force_recreate=True):
                 )
             continue
         
-        # Identificar compañías que tienen esta tabla
-        companies_with_table = set()
-        for company_result in table_analysis['company_results']:
-            companies_with_table.add(company_result['company_name'])
+        all_results[table_name] = table_analysis
         
-        # Registrar estado 0 para compañías sin esta tabla
-        for _, company in pending_companies.iterrows():
-            if company['company_name'] not in companies_with_table:
+        # Obtener compañías que tienen la tabla
+        companies_with_table = {result['company_name'] for result in table_analysis['company_results']}
+        
+        # Registrar estado 0 para compañías que no tienen la tabla
+        for _, company in companies_df.iterrows():
+            company_name = company['company_name']
+            if company_name not in companies_with_table:
                 tracking_manager.update_status(
                     company_id=company['company_id'],
                     table_name=table_name,
@@ -411,6 +495,7 @@ def generate_all_silver_views(force_recreate=True):
             
             # Validar que se generó SQL válido
             if sql_content is None:
+                print(f"    ⚠️  No se pudo generar SQL para {company_name}")
                 tracking_manager.update_status(
                     company_id=company_result['company_id'],
                     table_name=table_name,
@@ -420,85 +505,116 @@ def generate_all_silver_views(force_recreate=True):
                 continue
             
             # Ejecutar vista directamente en BigQuery con reconexión automática
-            client = create_bigquery_client()  # Crear cliente inicial
             max_retries = 3
             for attempt in range(max_retries):
                 try:
                     if attempt > 0:
+                        print(f"    🔄 Reintento {attempt + 1}/{max_retries} para {company_name}")
                         # Recrear cliente en caso de error de autenticación
+                        global client
                         client = create_bigquery_client()
-                        import time
-                        time.sleep(2)
+                        time.sleep(2)  # Esperar antes del reintento
                     
+                    print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
                     query_job = client.query(sql_content)
                     query_job.result()  # Esperar a que termine
+                    print(f"    ✅ Vista creada: {company_name}")
+                    company_sql_files.append(f"SUCCESS: {company_name}")
                     
-                    # Registrar éxito
+                    # Actualizar tracking
                     tracking_manager.update_status(
                         company_id=company_result['company_id'],
                         table_name=table_name,
                         status=1,
-                        notes="Vista Silver creada exitosamente"
+                        notes=f"Vista creada exitosamente en {project_id}.silver"
                     )
+                    break  # Éxito, salir del loop de reintentos
                     
-                    # Guardar archivo SQL
-                    filename = f"{output_dir}/{table_name}_{company_name.replace(' ', '_')}.sql"
-                    with open(filename, 'w', encoding='utf-8') as f:
-                        f.write(sql_content)
-                    company_sql_files.append(filename)
-                    
-                    break  # Salir del loop de reintentos si fue exitoso
                 except Exception as e:
-                    if attempt == max_retries - 1:
+                    error_msg = str(e)
+                    if attempt == max_retries - 1:  # Último intento
+                        print(f"    ❌ Error final creando vista {company_name}: {error_msg}")
+                        company_sql_files.append(f"ERROR: {company_name}")
+                        
+                        # Actualizar tracking con error
                         tracking_manager.update_status(
                             company_id=company_result['company_id'],
                             table_name=table_name,
                             status=2,
-                            notes=f"Error: {str(e)}"
+                            error_message=error_msg,
+                            notes=f"Error al crear vista en {project_id}.silver"
                         )
-                    continue
+                    else:
+                        print(f"    ⚠️  Error en intento {attempt + 1}: {error_msg}")
+                        continue
         
-        # Guardar resultados
-        all_results[table_name] = {
-            'analysis': table_analysis,
-            'sql_files': company_sql_files
-        }
+        # Crear archivo consolidado para la tabla
+        consolidated_filename = f"{output_dir}/consolidated_{table_name}_analysis.sql"
+        with open(consolidated_filename, 'w', encoding='utf-8') as f:
+            f.write(f"-- Análisis consolidado para tabla: {table_name}\n")
+            f.write(f"-- Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            
+            f.write(f"-- Resumen:\n")
+            f.write(f"-- Total compañías: {table_analysis['total_companies']}\n")
+            f.write(f"-- Campos comunes: {len(table_analysis['common_fields'])}\n")
+            f.write(f"-- Campos parciales: {len(table_analysis['partial_fields'])}\n\n")
+            
+            f.write(f"-- Campos comunes:\n")
+            for field in table_analysis['common_fields']:
+                f.write(f"--   - {field}\n")
+            
+            f.write(f"\n-- Campos parciales:\n")
+            for field in table_analysis['partial_fields']:
+                count = table_analysis['field_frequency'][field]
+                f.write(f"--   - {field}: {count}/{table_analysis['total_companies']} compañías\n")
+            
+            f.write(f"\n-- Archivos SQL generados:\n")
+            for sql_file in company_sql_files:
+                f.write(f"--   - {sql_file}\n")
         
+        print(f"    📄 Archivo consolidado: {consolidated_filename}")
     
     # Generar resumen final
-    summary_filename = f"{output_dir}/generation_summary.md"
+    summary_filename = f"{output_dir}/GENERATION_SUMMARY.md"
     with open(summary_filename, 'w', encoding='utf-8') as f:
-        f.write(f"# Resumen de Generación de Vistas Silver\n\n")
-        f.write(f"**Fecha:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"**Tablas procesadas:** {len(all_results)}\n\n")
+        f.write(f"# Resumen de Generación de Vistas Silver - CLOUD RUN JOB\n\n")
+        f.write(f"**Fecha de generación:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         
-        for table_name, result in all_results.items():
-            f.write(f"## {table_name}\n")
-            f.write(f"- Archivos SQL: {len(result['sql_files'])}\n")
-            f.write(f"- Campos comunes: {len(result['analysis']['field_consensus'])}\n")
-            f.write(f"- Conflictos de tipo: {len(result['analysis']['type_conflicts'])}\n\n")
+        f.write(f"## Tablas Procesadas\n\n")
+        f.write(f"Total de tablas procesadas: {len(all_results)}\n\n")
+        
+        for table_name, analysis in all_results.items():
+            f.write(f"### {table_name}\n")
+            f.write(f"- Compañías con la tabla: {analysis['total_companies']}\n")
+            f.write(f"- Campos comunes: {len(analysis['common_fields'])}\n")
+            f.write(f"- Campos parciales: {len(analysis['partial_fields'])}\n\n")
     
     # Mostrar resumen final
-    processed_count = 0
-    skipped_count = 0
+    print(f"\n📊 RESUMEN FINAL:")
+    print("=" * 80)
     
     for table_name in all_tables:
         completion_status = tracking_manager.get_table_completion_status(table_name)
-        
-        if completion_status['is_fully_consolidated']:
-            skipped_count += 1
-        else:
-            processed_count += 1
+        print(f"  🔄 {table_name}: {completion_status['completion_rate']:.1f}% completada")
     
+    print(f"\n🎯 CLOUD RUN JOB COMPLETADO")
+    print(f"📁 Directorio: {output_dir}")
+    print(f"📊 Tablas procesadas: {len(all_results)}")
+    print(f"📄 Resumen: {summary_filename}")
+    print(f"📊 Tracking: Tabla companies_consolidated actualizada")
     
-    print(f"PROCESO COMPLETADO: {len(all_results)} tablas procesadas")
     return all_results, output_dir
 
 if __name__ == "__main__":
-    print("INICIANDO GENERATE SILVER VIEWS JOB")
-    # Ejecutar generación (VERSIÓN JOB - SIN INTERACCIÓN)
-    results, output_dir = generate_all_silver_views(force_recreate=True)
-    print("JOB TERMINADO")
+    print("=" * 80)
+    print("🚀 CLOUD RUN JOB - GENERATE SILVER VIEWS")
+    print("⚙️  MODO: FORZADO (Sin confirmaciones)")
+    print("=" * 80)
+    
+    # Ejecutar generación FORZADA (sin argumentos, sin confirmaciones)
+    results, output_dir = generate_all_silver_views_job()
+    
+    print(f"\n✅ CLOUD RUN JOB COMPLETADO EXITOSAMENTE!")
+    print(f"📁 Archivos generados en: {output_dir}")
+    print("=" * 80)
 
-    print(f"\n✅ Script completado exitosamente!")
-    print(f"📁 Revisa los archivos en: {output_dir}")    
