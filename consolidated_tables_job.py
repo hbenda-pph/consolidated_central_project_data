@@ -52,26 +52,52 @@ def get_metadata_dict():
 
 def get_available_tables():
     """Obtiene lista de tablas que tienen vistas Silver disponibles"""
-    query = f"""
-        SELECT DISTINCT
-            REPLACE(table_name, 'vw_', '') as table_name,
-            COUNT(DISTINCT table_schema) as company_count
-        FROM `{PROJECT_SOURCE}.region-us.INFORMATION_SCHEMA.TABLES`
-        WHERE table_schema LIKE 'silver%'
-          AND table_name LIKE 'vw_%'
-        GROUP BY table_name
-        HAVING company_count >= 1
-        ORDER BY table_name
+    # Obtener lista de compañías activas
+    companies_query = f"""
+        SELECT DISTINCT company_project_id
+        FROM `{PROJECT_SOURCE}.settings.companies`
+        WHERE company_fivetran_status = TRUE
+          AND company_bigquery_status = TRUE
+          AND company_project_id IS NOT NULL
     """
     
     try:
-        query_job = client.query(query)
+        # Obtener compañías
+        query_job = client.query(companies_query)
         results = query_job.result()
-        df = pd.DataFrame([dict(row) for row in results])
+        companies = [row.company_project_id for row in results]
         
-        tables = df['table_name'].tolist()
+        if not companies:
+            print("❌ No se encontraron compañías activas")
+            return []
+        
+        print(f"📊 Analizando {len(companies)} compañías...")
+        
+        # Recopilar todas las tablas únicas de todas las compañías
+        all_tables = set()
+        
+        for company_project_id in companies:
+            try:
+                # Buscar vistas Silver en esta compañía
+                tables_query = f"""
+                    SELECT DISTINCT REPLACE(table_name, 'vw_', '') as table_name
+                    FROM `{company_project_id}.silver.INFORMATION_SCHEMA.TABLES`
+                    WHERE table_name LIKE 'vw_%'
+                """
+                
+                query_job = client.query(tables_query)
+                results = query_job.result()
+                company_tables = [row.table_name for row in results]
+                all_tables.update(company_tables)
+                
+            except Exception as e:
+                # Saltar compañías con errores (ej: sin dataset silver)
+                continue
+        
+        tables = sorted(list(all_tables))
         print(f"✅ Tablas disponibles: {len(tables)}")
         return tables
+        
     except Exception as e:
         print(f"❌ Error obteniendo tablas: {str(e)}")
         return []
@@ -79,28 +105,48 @@ def get_available_tables():
 def get_companies_for_table(table_name):
     """Obtiene compañías que tienen una vista Silver específica"""
     query = f"""
-        SELECT DISTINCT
-            c.company_id,
-            c.company_name,
-            c.company_project_id
-        FROM `{PROJECT_SOURCE}.settings.companies` c
-        WHERE c.company_fivetran_status = TRUE
-          AND c.company_bigquery_status = TRUE
-          AND c.company_project_id IS NOT NULL
-          AND EXISTS (
-              SELECT 1
-              FROM `{PROJECT_SOURCE}.region-us.INFORMATION_SCHEMA.TABLES` t
-              WHERE t.table_schema = CONCAT('silver_', REPLACE(c.company_project_id, '-', '_'))
-                AND t.table_name = CONCAT('vw_', '{table_name}')
-          )
-        ORDER BY c.company_id
+        SELECT 
+            company_id,
+            company_name,
+            company_project_id
+        FROM `{PROJECT_SOURCE}.settings.companies`
+        WHERE company_fivetran_status = TRUE
+          AND company_bigquery_status = TRUE
+          AND company_project_id IS NOT NULL
+        ORDER BY company_id
     """
     
     try:
         query_job = client.query(query)
         results = query_job.result()
-        df = pd.DataFrame([dict(row) for row in results])
+        all_companies = pd.DataFrame([dict(row) for row in results])
+        
+        # Filtrar compañías que tienen la vista
+        companies_with_view = []
+        
+        for _, company in all_companies.iterrows():
+            try:
+                # Verificar si la vista existe en esta compañía
+                check_query = f"""
+                    SELECT 1
+                    FROM `{company['company_project_id']}.silver.INFORMATION_SCHEMA.TABLES`
+                    WHERE table_name = 'vw_{table_name}'
+                    LIMIT 1
+                """
+                
+                check_job = client.query(check_query)
+                check_results = list(check_job.result())
+                
+                if check_results:
+                    companies_with_view.append(company)
+                    
+            except Exception:
+                # Saltar compañías sin la vista
+                continue
+        
+        df = pd.DataFrame(companies_with_view)
         return df
+        
     except Exception as e:
         print(f"  ⚠️  Error obteniendo compañías: {str(e)}")
         return pd.DataFrame()
