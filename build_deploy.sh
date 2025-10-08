@@ -69,7 +69,7 @@ if gcloud run jobs describe ${JOB_NAME} --region=${REGION} &> /dev/null; then
         --cpu 2 \
         --max-retries 3 \
         --parallelism 1 \
-        --task-timeout 1800        
+        --task-timeout 1800 \
         --set-env-vars PYTHONUNBUFFERED=1 \
         --service-account ${SERVICE_ACCOUNT}
 else
@@ -81,7 +81,7 @@ else
         --cpu 2 \
         --max-retries 3 \
         --parallelism 1 \
-        --task-timeout 1800        
+        --task-timeout 1800 \
         --set-env-vars PYTHONUNBUFFERED=1 \
         --service-account ${SERVICE_ACCOUNT}
 fi
