@@ -66,10 +66,19 @@ COPY consolidated_tables_job.py .
 CMD ["python", "consolidated_tables_job.py"]
 EOF
 
-gcloud builds submit --tag ${IMAGE_TAG} -f Dockerfile.consolidated
+# Crear cloudbuild.yaml temporal
+cat > cloudbuild.yaml << EOF
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', '${IMAGE_TAG}', '-f', 'Dockerfile.consolidated', '.']
+images:
+- '${IMAGE_TAG}'
+EOF
 
-# Limpiar Dockerfile temporal
-rm Dockerfile.consolidated
+gcloud builds submit --config=cloudbuild.yaml
+
+# Limpiar archivos temporales
+rm Dockerfile.consolidated cloudbuild.yaml
 
 if [ $? -eq 0 ]; then
     echo "✅ Build exitoso!"
