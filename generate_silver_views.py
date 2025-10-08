@@ -227,13 +227,16 @@ def generate_silver_view_sql(table_analysis, company_result):
     silver_fields = []
     processed_fields = set()  # Para evitar duplicados
     
-    # 1. Procesar campos comunes (sin conflictos de tipo)
-    for field_name, field_info in table_analysis['field_consensus'].items():
+    # CRÍTICO: Primero procesar campos CON conflictos (tienen prioridad)
+    # Si un campo tiene conflicto en CUALQUIER compañía, TODAS deben usar el consensus_type
+    
+    # 1. Procesar campos con conflictos de tipo PRIMERO
+    for field_name, conflict_info in table_analysis['type_conflicts'].items():
         # SOLO incluir campos que existen en esta compañía y no se han procesado
         if field_name not in company_field_names or field_name in processed_fields:
             continue
             
-        target_type = field_info['type']
+        target_type = conflict_info['consensus_type']  # Siempre STRING si hay conflicto
         source_type = company_fields.get(field_name)
         
         # Si el campo no existe en esta compañía, saltarlo
@@ -244,14 +247,14 @@ def generate_silver_view_sql(table_analysis, company_result):
         cast_expression = generate_cast_for_field(field_name, source_type, target_type)
         silver_fields.append(f"    {cast_expression} as {field_name}")
         processed_fields.add(field_name)
-        
-    # 2. Procesar campos con conflictos de tipo (solo los no procesados)
-    for field_name, conflict_info in table_analysis['type_conflicts'].items():
-        # SOLO incluir campos que existen en esta compañía y no se han procesado
+    
+    # 2. Procesar campos SIN conflictos (solo los que NO fueron procesados arriba)
+    for field_name, field_info in table_analysis['field_consensus'].items():
+        # SOLO incluir campos que existen en esta compañía y NO se procesaron ya
         if field_name not in company_field_names or field_name in processed_fields:
             continue
             
-        target_type = conflict_info['consensus_type']
+        target_type = field_info['type']
         source_type = company_fields.get(field_name)
         
         # Si el campo no existe en esta compañía, saltarlo
@@ -275,7 +278,8 @@ def generate_silver_view_sql(table_analysis, company_result):
         else:
             target_type = table_analysis['type_conflicts'][field_name]['consensus_type']
         
-        default_value = get_default_value_for_type(target_type)
+        # CRÍTICO: Usar CAST(NULL AS tipo) para mantener compatibilidad con UNION ALL
+        default_value = get_default_value_for_type_with_cast(target_type)
         silver_fields.append(f"    {default_value} as {field_name}")
     
     # 4. Metadata fields (eliminados - no necesarios en vistas por compañía)
@@ -412,6 +416,24 @@ def get_default_value_for_type(data_type):
         'TIMESTAMP': 'NULL',
         'JSON': 'NULL',
         'BYTES': 'NULL'
+    }
+    return defaults.get(data_type, 'NULL')
+
+def get_default_value_for_type_with_cast(data_type):
+    """
+    Obtiene el valor por defecto para un tipo de datos con CAST explícito
+    CRÍTICO: Para campos faltantes, usar CAST(NULL AS tipo) para UNION ALL
+    """
+    defaults = {
+        'STRING': "CAST(NULL AS STRING)",
+        'INT64': "CAST(NULL AS INT64)",
+        'FLOAT64': "CAST(NULL AS FLOAT64)",
+        'BOOL': "CAST(NULL AS BOOL)",
+        'DATE': "CAST(NULL AS DATE)",
+        'DATETIME': "CAST(NULL AS DATETIME)",
+        'TIMESTAMP': "CAST(NULL AS TIMESTAMP)",
+        'JSON': "CAST(NULL AS JSON)",
+        'BYTES': "CAST(NULL AS BYTES)"
     }
     return defaults.get(data_type, 'NULL')
 
