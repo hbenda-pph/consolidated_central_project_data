@@ -148,69 +148,43 @@ def analyze_table_fields_across_companies(table_name):
 
 def determine_consensus_type(types_list):
     """
-    Determina el tipo consenso basado en prioridades
+    Determina el tipo consenso: SI HAY DIFERENCIAS → STRING
     """
-    type_priority = {
-        'STRING': 1,
-        'INT64': 2,
-        'FLOAT64': 3,
-        'BOOL': 4,
-        'DATE': 5,
-        'DATETIME': 6,
-        'TIMESTAMP': 7,
-        'JSON': 8,
-        'BYTES': 9
-    }
+    # Si todos los tipos son iguales, usar ese tipo
+    unique_types = set(types_list)
     
-    # Contar ocurrencias de cada tipo
-    type_counts = {}
-    for t in types_list:
-        type_counts[t] = type_counts.get(t, 0) + 1
+    if len(unique_types) == 1:
+        return list(unique_types)[0]
     
-    # Ordenar por prioridad y luego por frecuencia
-    types = sorted(type_counts.keys(), 
-                  key=lambda x: (type_priority.get(x, 999), -type_counts[x]))
-    
-    return types[0]
+    # SI HAY CUALQUIER DIFERENCIA → STRING
+    return 'STRING'
 
 def generate_cast_for_field(field_name, source_type, target_type):
     """
     Genera la expresión CAST apropiada para un campo
+    REGLA SIMPLE: Cualquier tipo → STRING siempre es seguro
     """
     if source_type == target_type:
         return field_name
     
-    # Mapeo de conversiones seguras
-    # REGLA CRÍTICA: SIEMPRE priorizar STRING cuando hay conflicto
-    safe_casts = {
-        ('INT64', 'STRING'): f"CAST({field_name} AS STRING)",
-        ('INT64', 'FLOAT64'): f"CAST({field_name} AS FLOAT64)",
-        ('FLOAT64', 'STRING'): f"CAST({field_name} AS STRING)",
-        # 🚨 CORREGIDO: STRING a INT64/FLOAT64 NO es seguro si contiene letras
-        # SIEMPRE convertir a STRING para evitar errores
-        ('STRING', 'INT64'): f"CAST({field_name} AS STRING)",  # Mantener como STRING
-        ('STRING', 'FLOAT64'): f"CAST({field_name} AS STRING)",  # Mantener como STRING
-        ('STRING', 'BOOL'): f"SAFE_CAST({field_name} AS BOOL)",
-        ('BOOL', 'STRING'): f"CAST({field_name} AS STRING)",
-        ('DATE', 'STRING'): f"CAST({field_name} AS STRING)",
-        ('DATETIME', 'STRING'): f"CAST({field_name} AS STRING)",
-        ('TIMESTAMP', 'STRING'): f"CAST({field_name} AS STRING)",
-        # 🚨 CRÍTICO: TIMESTAMP vs INT64 - SIEMPRE a TIMESTAMP
-        ('INT64', 'TIMESTAMP'): f"TIMESTAMP_SECONDS({field_name})",
-        ('TIMESTAMP', 'INT64'): f"UNIX_SECONDS({field_name})",
-        # JSON a otros tipos - usar TO_JSON_STRING para convertir a STRING
-        ('JSON', 'STRING'): f"COALESCE(TO_JSON_STRING({field_name}), '')",
-        # 🚨 CORREGIDO: JSON a INT64/FLOAT64 también debe ir a STRING
-        ('JSON', 'INT64'): f"COALESCE(TO_JSON_STRING({field_name}), '')",  # A STRING
-        ('JSON', 'FLOAT64'): f"COALESCE(TO_JSON_STRING({field_name}), '')"  # A STRING
-    }
+    # Si el target es STRING, SIEMPRE hacer CAST simple
+    if target_type == 'STRING':
+        # Casos especiales para tipos complejos
+        if source_type == 'JSON':
+            return f"COALESCE(TO_JSON_STRING({field_name}), '')"
+        elif source_type in ['STRUCT', 'ARRAY', 'RECORD']:
+            return f"COALESCE(TO_JSON_STRING({field_name}), '')"
+        else:
+            # Para todos los demás tipos, CAST simple a STRING
+            return f"CAST({field_name} AS STRING)"
     
-    cast_key = (source_type, target_type)
-    if cast_key in safe_casts:
-        return safe_casts[cast_key]
+    # Si el target NO es STRING pero el source SÍ es STRING, mantener como STRING
+    # (porque estamos en un escenario de conflicto y STRING es más seguro)
+    if source_type == 'STRING':
+        return f"CAST({field_name} AS STRING)"
     
-    # Para conversiones no seguras, usar SAFE_CAST con valor por defecto
-    return f"COALESCE(SAFE_CAST({field_name} AS {target_type}), {get_default_value_for_type(target_type)})"
+    # Para otros casos (mismo tipo o conversiones entre no-STRING)
+    return f"SAFE_CAST({field_name} AS {target_type})"
 
 def get_default_value_for_type(data_type):
     """Obtiene el valor por defecto para un tipo de datos"""
@@ -474,7 +448,7 @@ def generate_all_silver_views(force_recreate=True):
                     company_sql_files.append(filename)
                     
                     break  # Salir del loop de reintentos si fue exitoso
-                except Exception as e:
+    except Exception as e:
                     if attempt == max_retries - 1:
                         tracking_manager.update_status(
                             company_id=company_result['company_id'],
