@@ -564,8 +564,8 @@ def generate_all_silver_views_job():
                         notes=f"Vista creada exitosamente en {project_id}.silver"
                     )
                     break  # Éxito, salir del loop de reintentos
-                    
-                except Exception as e:
+        
+    except Exception as e:
                     error_msg = str(e)
                     if attempt == max_retries - 1:  # Último intento
                         print(f"    ❌ Error final creando vista {company_name}: {error_msg}")

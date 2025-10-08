@@ -7,10 +7,10 @@
 set -e  # Salir si hay algún error
 
 # Configuración
-PROJECT_ID="pph-central"
+PROJECT_ID="platform-partners-qua"
 JOB_NAME="create-consolidated-tables-job"
 REGION="us-east1"
-SERVICE_ACCOUNT="data-analytics@platform-partners-pro.iam.gserviceaccount.com"
+SERVICE_ACCOUNT="data-analytics@${PROJECT_ID}.iam.gserviceaccount.com"
 IMAGE_TAG="gcr.io/${PROJECT_ID}/${JOB_NAME}"
 
 echo "🚀 Iniciando Build & Deploy para Consolidated Tables Job"

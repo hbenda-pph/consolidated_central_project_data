@@ -10,8 +10,8 @@ from datetime import datetime
 import sys
 
 # Configuración
-PROJECT_CENTRAL = 'pph-central'
-PROJECT_SOURCE = 'platform-partners-pro'
+PROJECT_CENTRAL = 'platform-partners-qua'
+PROJECT_SOURCE = 'pph-central'
 DATASET_BRONZE = 'bronze'
 DATASET_SILVER = 'silver'
 DATASET_MANAGEMENT = 'management'
