@@ -293,10 +293,23 @@ def generate_silver_view_sql(table_analysis, company_result):
         print(f"  ⚠️  No hay campos para procesar en {company_name} - {table_name}")
         return None
     
+    # CRÍTICO: Ordenar campos alfabéticamente para consistencia en UNION ALL
+    # BigQuery une por POSICIÓN, no por nombre
+    # Extraer nombre del campo de cada expresión (después del "as")
+    field_dict = {}
+    for field_expr in silver_fields:
+        # Extraer el nombre del campo (después de "as")
+        field_name = field_expr.strip().split(' as ')[-1]
+        field_dict[field_name] = field_expr
+    
+    # Ordenar alfabéticamente por nombre de campo
+    sorted_field_names = sorted(field_dict.keys())
+    sorted_silver_fields = [field_dict[name] for name in sorted_field_names]
+    
     # Agregar comas entre campos (excepto el último)
     fields_with_commas = []
-    for i, field in enumerate(silver_fields):
-        if i < len(silver_fields) - 1:
+    for i, field in enumerate(sorted_silver_fields):
+        if i < len(sorted_silver_fields) - 1:
             fields_with_commas.append(field + ",")
         else:
             fields_with_commas.append(field)
