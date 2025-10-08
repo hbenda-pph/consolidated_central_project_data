@@ -7,7 +7,7 @@
 set -e  # Salir si hay algún error
 
 # Configuración
-PROJECT_ID="platform-partners-qua"
+PROJECT_ID="platform-partners-des"
 JOB_NAME="create-consolidated-tables-job"
 REGION="us-east1"
 SERVICE_ACCOUNT="data-analytics@${PROJECT_ID}.iam.gserviceaccount.com"
