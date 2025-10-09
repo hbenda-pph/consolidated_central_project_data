@@ -27,7 +27,6 @@ def get_metadata_dict():
             partition_fields,
             cluster_fields
         FROM `{PROJECT_CENTRAL}.{DATASET_MANAGEMENT}.metadata_consolidated_tables`
-        WHERE is_active = TRUE
         ORDER BY table_name
     """
     
@@ -38,6 +37,13 @@ def get_metadata_dict():
         results = query_job.result()
         df = pd.DataFrame([dict(row) for row in results])
         
+        print(f"🔍 DEBUG: Filas obtenidas de metadatos: {len(df)}")
+        
+        if len(df) > 0:
+            print(f"📋 Primeras 5 tablas en metadatos:")
+            for i, row in df.head(5).iterrows():
+                print(f"   - {row['table_name']}: partition={row['partition_fields']}, cluster={row['cluster_fields']}")
+        
         metadata_dict = {}
         for _, row in df.iterrows():
             metadata_dict[row['table_name']] = {
@@ -46,6 +52,7 @@ def get_metadata_dict():
             }
         
         print(f"✅ Metadatos cargados: {len(metadata_dict)} tablas")
+        print(f"📋 Tablas en diccionario: {list(metadata_dict.keys())[:10]}")
         return metadata_dict
     except Exception as e:
         print(f"⚠️  Error cargando metadatos: {str(e)}")
@@ -153,6 +160,22 @@ def get_companies_for_table(table_name):
         print(f"  ⚠️  Error obteniendo compañías: {str(e)}")
         return pd.DataFrame()
 
+def verify_field_exists(table_name, field_name, company_project_id):
+    """Verifica si un campo existe en una vista Silver"""
+    try:
+        query = f"""
+            SELECT 1
+            FROM `{company_project_id}.silver.INFORMATION_SCHEMA.COLUMNS`
+            WHERE table_name = 'vw_{table_name}'
+              AND column_name = '{field_name}'
+            LIMIT 1
+        """
+        
+        result = client.query(query).result()
+        return len(list(result)) > 0
+    except Exception:
+        return False
+
 def detect_partition_field(table_name, sample_company_project_id):
     """Detecta un campo de fecha apropiado para particionar"""
     # Lista de campos comunes de fecha (en orden de preferencia)
@@ -198,14 +221,35 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
     # Obtener metadatos
     if table_name in metadata_dict:
         metadata = metadata_dict[table_name]
-        partition_field = metadata['partition_fields'][0] if metadata['partition_fields'] else None
-        cluster_fields = metadata['cluster_fields'] if metadata['cluster_fields'] else ['company_id']
+        print(f"  🔍 DEBUG: Metadatos encontrados para '{table_name}'")
+        print(f"     partition_fields: {metadata['partition_fields']} (tipo: {type(metadata['partition_fields'])})")
+        print(f"     cluster_fields: {metadata['cluster_fields']} (tipo: {type(metadata['cluster_fields'])})")
+        
+        # Manejar arrays de BigQuery
+        partition_fields_list = list(metadata['partition_fields']) if metadata['partition_fields'] else []
+        cluster_fields_list = list(metadata['cluster_fields']) if metadata['cluster_fields'] else []
+        
+        # PARTICIONAMIENTO: Intentar campos en orden (tipo COALESCE)
+        # Solo se usa 1 campo, pero se prueban varios por si el primero no existe
+        partition_field = None
+        if partition_fields_list:
+            for field in partition_fields_list:
+                # Verificar si el campo existe en la vista
+                if verify_field_exists(table_name, field, companies_df.iloc[0]['company_project_id']):
+                    partition_field = field
+                    print(f"  ✅ Campo de particionamiento seleccionado: {field}")
+                    break
+                else:
+                    print(f"  ⚠️  Campo '{field}' no existe en la vista, probando siguiente...")
+        
+        # CLUSTERIZADO: Usar todos los campos (hasta 4)
+        cluster_fields = cluster_fields_list[:4] if cluster_fields_list else ['company_id']
     else:
         print(f"  ⚠️  Tabla '{table_name}' NO está en metadatos")
         partition_field = None
         cluster_fields = ['company_id']
     
-    # Si no hay partition_field, intentar detectarlo
+    # Si no hay partition_field, intentar detectarlo automáticamente
     if not partition_field:
         print(f"  🔍 Detectando campo de particionamiento automáticamente...")
         partition_field = detect_partition_field(table_name, companies_df.iloc[0]['company_project_id'])
