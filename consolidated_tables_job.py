@@ -217,13 +217,29 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
             return False
     
     # Construir UNION ALL
+    # 🚧 TEMPORAL: Las vistas Silver actualmente YA incluyen company_project_id y company_id (INCORRECTO)
+    # Por ahora, usamos EXCEPT para evitar duplicados
+    # 
+    # 🔮 FUTURO: Cuando se corrija el Paso 2 (generate_silver_views) para NO incluir
+    # estos campos metadata en las vistas individuales, descomentar esta versión:
+    #
+    # union_part = f"""
+    #     SELECT 
+    #       '{company['company_project_id']}' AS company_project_id,
+    #       {company['company_id']} AS company_id,
+    #       *
+    #     FROM `{company['company_project_id']}.{DATASET_SILVER}.vw_{table_name}`"""
+    #
+    # RAZÓN: Los campos company_project_id y company_id son METADATA de consolidación,
+    # NO deberían estar en vistas individuales de cada compañía (solo en la consolidada)
+    
     union_parts = []
     for _, company in companies_df.iterrows():
         union_part = f"""
         SELECT 
           '{company['company_project_id']}' AS company_project_id,
           {company['company_id']} AS company_id,
-          *
+          * EXCEPT(company_project_id, company_id)
         FROM `{company['company_project_id']}.{DATASET_SILVER}.vw_{table_name}`"""
         union_parts.append(union_part)
     
