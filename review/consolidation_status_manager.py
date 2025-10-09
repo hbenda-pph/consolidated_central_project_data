@@ -2,6 +2,22 @@
 """
 Consolidation Status Manager - Consolidated Central Project Data
 
+⚠️ ARCHIVO OBSOLETO - Movido a review/
+
+RAZÓN: Este manager trabaja a nivel de COMPAÑÍA (status general por compañía),
+pero el proceso de consolidación trabaja a nivel de TABLA × COMPAÑÍA.
+
+PROBLEMA:
+- Una compañía puede tener 40 tablas exitosas y 2 con error
+- ¿El status de la compañía es COMPLETED o ERROR?
+- Demasiado general para tracking granular
+
+REEMPLAZO:
+- Usar: consolidation_tracking_manager.py
+- Tracking por tabla y compañía (más granular y útil)
+- Permite saber exactamente qué tabla falló en qué compañía
+
+FUNCIONALIDAD ORIGINAL:
 Sistema de gestión de estados de consolidación para compañías.
 Permite actualizar y consultar el estado del proceso de consolidación.
 """

@@ -25,7 +25,7 @@ echo ""
 
 # Verificar que estamos en el directorio correcto
 if [ ! -f "consolidated_tables_job.py" ]; then
-    echo "❌ Error: consolidated_tables_job.py no encontrado. Ejecuta este script desde el directorio consolidated_central_project_data/"
+    echo "❌ Error: consolidated_tables_job.py no encontrado. Ejecuta este script desde generate_consolidated_tables/"
     exit 1
 fi
 
@@ -46,39 +46,7 @@ fi
 echo ""
 echo "🔨 PASO 1: BUILD (Creando imagen Docker)"
 echo "=========================================="
-
-# Crear Dockerfile temporal específico para consolidated tables
-cat > Dockerfile.consolidated << 'EOF'
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Copiar requirements
-COPY requirements.txt .
-
-# Instalar dependencias
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copiar scripts necesarios
-COPY consolidated_tables_job.py .
-
-# Comando por defecto
-CMD ["python", "consolidated_tables_job.py"]
-EOF
-
-# Crear cloudbuild.yaml temporal
-cat > cloudbuild.yaml << EOF
-steps:
-- name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', '${IMAGE_TAG}', '-f', 'Dockerfile.consolidated', '.']
-images:
-- '${IMAGE_TAG}'
-EOF
-
-gcloud builds submit --config=cloudbuild.yaml
-
-# Limpiar archivos temporales
-rm Dockerfile.consolidated cloudbuild.yaml
+gcloud builds submit --tag ${IMAGE_TAG}
 
 if [ $? -eq 0 ]; then
     echo "✅ Build exitoso!"

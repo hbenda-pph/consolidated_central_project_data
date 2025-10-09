@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-Generate Silver Views for All Tables
-
+Generate Silver Views for All Tables - CLOUD RUN JOB VERSION
 Este script genera automáticamente las vistas Silver para todas las tablas
 basándose en el análisis de campos comunes y únicos entre compañías.
 
-Paso 1: Crear vistas Silver por compañía con layout normalizado
+VERSIÓN PARA CLOUD RUN JOB:
+- Sin prompts interactivos
+- Modo forzado activado por defecto
+- Procesa TODAS las tablas y compañías
 """
 
 from google.cloud import bigquery
@@ -18,17 +20,9 @@ from collections import defaultdict, Counter
 import os
 warnings.filterwarnings('ignore')
 
-# print("✅ Librerías importadas correctamente")
-
-# Importar configuración centralizada
+# Importar configuración y tracking manager (mismo directorio)
 from config import *
-from consolidation_status_manager import ConsolidationStatusManager
 from consolidation_tracking_manager import ConsolidationTrackingManager
-
-# print(f"🔧 Configuración:")
-# print(f"   Proyecto: {PROJECT_SOURCE}")
-# print(f"   Dataset: {DATASET_NAME}")
-# print(f"   Tabla: {TABLE_NAME}")
 
 # Crear cliente BigQuery con reconexión automática
 def create_bigquery_client():
@@ -43,7 +37,7 @@ def create_bigquery_client():
 
 try:
     client = create_bigquery_client()
-    # print(f"✅ Cliente BigQuery creado exitosamente para proyecto: {PROJECT_SOURCE}")
+    print(f"✅ Cliente BigQuery creado exitosamente para proyecto: {PROJECT_SOURCE}")
 except Exception as e:
     print(f"❌ Error al crear cliente BigQuery: {str(e)}")
     raise
@@ -70,7 +64,7 @@ def get_companies_info():
         query_job = client.query(query)
         results = query_job.result()
         companies_df = pd.DataFrame([dict(row) for row in results])
-        # print(f"✅ Información de compañías obtenida: {len(companies_df)} registros")
+        print(f"✅ Información de compañías obtenida: {len(companies_df)} registros")
         return companies_df
     except Exception as e:
         print(f"❌ Error al obtener información de compañías: {str(e)}")
@@ -136,8 +130,6 @@ def analyze_table_fields_across_companies(table_name):
         fields_list = filtered_fields_df['column_name'].tolist()
         field_count = len(fields_list)
         
-        # print(f"  ✅ {company_name}: {field_count} campos (filtrados _fivetran)")
-        
         # Guardar información
         table_analysis_results.append({
             'company_id': company_id,
@@ -181,11 +173,6 @@ def analyze_table_fields_across_companies(table_name):
     print(f"  Campos parciales: {len(partial_fields)}")
     print(f"  Campos sin conflicto de tipo: {len(field_consensus)}")
     print(f"  Campos con conflicto de tipo: {len(type_conflicts)}")
-    
-    # if common_fields:
-    #     print(f"\n✅ CAMPOS COMUNES:")
-    #     for field in common_fields:
-    #         print(f"    - {field}")
     
     if partial_fields:
         print(f"\n⚠️  CAMPOS PARCIALES:")
@@ -282,8 +269,6 @@ def generate_silver_view_sql(table_analysis, company_result):
         default_value = get_default_value_for_type_with_cast(target_type)
         silver_fields.append(f"    {default_value} as {field_name}")
     
-    # 4. Metadata fields (eliminados - no necesarios en vistas por compañía)
-    
     # Crear SQL
     dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
     view_name = f"vw_{table_name}"
@@ -368,7 +353,7 @@ def analyze_data_types_for_table(table_analysis_results):
                 'companies': type_info_list,
                 'consensus_type': determine_consensus_type(unique_types, type_info_list)
             }
-    else:
+        else:
             # No hay conflicto
             field_consensus[field_name] = {
                 'type': unique_types[0],
@@ -450,37 +435,53 @@ def get_default_value_for_type_with_cast(data_type):
     }
     return defaults.get(data_type, 'NULL')
 
-def generate_all_silver_views(force_recreate=False):
+def generate_all_silver_views(force_mode=True, start_from_letter='a'):
     """
-    Genera vistas Silver para todas las tablas identificadas con seguimiento de estados
+    Genera vistas Silver para todas las tablas
     
     Args:
-        force_recreate (bool): Si True, recrea todas las vistas sin importar el estado de consolidación
-    """
-    print("🚀 Iniciando generación de vistas Silver para todas las tablas")
+        force_mode (bool): Si True, procesa todas sin confirmación
+        start_from_letter (str): Letra inicial para filtrar tablas (útil para reiniciar)
     
-    # Inicializar gestores
-    status_manager = ConsolidationStatusManager()
+    Returns:
+        tuple: (all_results, output_dir)
+    """
+    mode_text = "FORZADO" if force_mode else "NORMAL"
+    print(f"🚀 GENERACIÓN DE VISTAS SILVER - MODO: {mode_text}")
+    print("=" * 80)
+    
+    # Inicializar gestor de tracking
     tracking_manager = ConsolidationTrackingManager()
     
-    # Obtener compañías pendientes de consolidación
-    pending_companies = status_manager.get_companies_for_consolidation()
+    # HARDCODED: Obtener TODAS las compañías activas (sin filtro de status)
+    print("📋 Obteniendo TODAS las compañías activas...")
+    companies_df = get_companies_info()
     
-    if pending_companies.empty:
-        print("ℹ️  No hay compañías pendientes de consolidación")
+    if companies_df.empty:
+        print("❌ No hay compañías activas para procesar")
         return {}, {}
     
-    print(f"📋 Compañías a procesar: {len(pending_companies)}")
+    print(f"✅ Compañías encontradas: {len(companies_df)}")
     
-    # Usar configuración centralizada
-    all_tables = TABLES_TO_PROCESS
+    # Obtener tablas dinámicamente desde las compañías
+    print("📋 Obteniendo lista de tablas dinámicamente desde INFORMATION_SCHEMA...")
     
-    if force_recreate:
-        print("🔄 MODO FORZADO: Recreando todas las vistas sin importar estado de consolidación")
-        tables_to_process = all_tables
-    else:
-        print("📋 MODO NORMAL: Filtrando tablas ya consolidadas")
-        tables_to_process = tracking_manager.get_tables_to_process(all_tables)
+    from config import get_tables_dynamically
+    all_tables_full = get_tables_dynamically()
+    
+    if not all_tables_full:
+        print("❌ ERROR: No se encontraron tablas en las compañías")
+        return {}, {}
+    
+    print(f"✅ Tablas encontradas dinámicamente: {len(all_tables_full)}")
+    
+    # Aplicar filtro de letra inicial (útil para reiniciar después de timeout)
+    all_tables = [t for t in all_tables_full if t >= start_from_letter]
+    
+    if start_from_letter != 'a':
+        print(f"🔍 FILTRO ACTIVO: Procesando tablas desde '{start_from_letter}'")
+    
+    print(f"📋 Tablas a procesar: {len(all_tables)} de {len(all_tables_full)} totales")
     
     all_results = {}
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -489,29 +490,14 @@ def generate_all_silver_views(force_recreate=False):
     output_dir = f"{OUTPUT_BASE_DIR}/silver_views_{timestamp}"
     os.makedirs(output_dir, exist_ok=True)
     
-    if not tables_to_process:
-        print("✅ Todas las tablas están 100% consolidadas. No hay nada que procesar.")
-        return {}, {}
-    
-    print(f"🚀 INICIANDO GENERACIÓN DE VISTAS SILVER")
     print(f"📁 Directorio de salida: {output_dir}")
-    print(f"📋 Tablas a procesar: {len(tables_to_process)}")
     print("=" * 80)
     
-    for table_name in tables_to_process:
+    for table_name in all_tables:
         print(f"\n🔄 Procesando tabla: {table_name}")
         
-        # Verificar si la tabla ya está 100% consolidada (solo en modo normal)
-        if not force_recreate:
-            completion_status = tracking_manager.get_table_completion_status(table_name)
-            
-            if completion_status['is_fully_consolidated']:
-                print(f"  ⏭️  Saltando tabla '{table_name}' - 100% consolidada ({completion_status['completion_rate']:.1f}%)")
-                continue
-        else:
-            # En modo forzado, mostrar estado pero no saltar
-            completion_status = tracking_manager.get_table_completion_status(table_name)
-        
+        # Mostrar estado actual (informativo, no bloquea ejecución)
+        completion_status = tracking_manager.get_table_completion_status(table_name)
         print(f"  📊 Estado actual: {completion_status['completion_rate']:.1f}% completada")
         print(f"     ✅ Éxitos: {completion_status['success_count']}")
         print(f"     ❌ Errores: {completion_status['error_count']}")
@@ -523,7 +509,7 @@ def generate_all_silver_views(force_recreate=False):
         if table_analysis is None:
             print(f"  ⏭️  Saltando tabla '{table_name}' - no se encontraron datos")
             # Registrar estado 0 para todas las compañías (tabla no existe)
-            for _, company in pending_companies.iterrows():
+            for _, company in companies_df.iterrows():
                 tracking_manager.update_status(
                     company_id=company['company_id'],
                     table_name=table_name,
@@ -538,7 +524,7 @@ def generate_all_silver_views(force_recreate=False):
         companies_with_table = {result['company_name'] for result in table_analysis['company_results']}
         
         # Registrar estado 0 para compañías que no tienen la tabla
-        for _, company in pending_companies.iterrows():
+        for _, company in companies_df.iterrows():
             company_name = company['company_name']
             if company_name not in companies_with_table:
                 tracking_manager.update_status(
@@ -594,7 +580,7 @@ def generate_all_silver_views(force_recreate=False):
                         notes=f"Vista creada exitosamente en {project_id}.silver"
                     )
                     break  # Éxito, salir del loop de reintentos
-                    
+        
                 except Exception as e:
                     error_msg = str(e)
                     if attempt == max_retries - 1:  # Último intento
@@ -642,7 +628,7 @@ def generate_all_silver_views(force_recreate=False):
     # Generar resumen final
     summary_filename = f"{output_dir}/GENERATION_SUMMARY.md"
     with open(summary_filename, 'w', encoding='utf-8') as f:
-        f.write(f"# Resumen de Generación de Vistas Silver\n\n")
+        f.write(f"# Resumen de Generación de Vistas Silver - CLOUD RUN JOB\n\n")
         f.write(f"**Fecha de generación:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         
         f.write(f"## Tablas Procesadas\n\n")
@@ -653,74 +639,18 @@ def generate_all_silver_views(force_recreate=False):
             f.write(f"- Compañías con la tabla: {analysis['total_companies']}\n")
             f.write(f"- Campos comunes: {len(analysis['common_fields'])}\n")
             f.write(f"- Campos parciales: {len(analysis['partial_fields'])}\n\n")
-        
-        f.write(f"## Archivos Generados\n\n")
-        f.write(f"Para cada tabla se generaron:\n")
-        f.write(f"- Un archivo SQL por compañía: `silver_{{table_name}}_{{project_id}}.sql`\n")
-        f.write(f"- Un archivo de análisis consolidado: `consolidated_{{table_name}}_analysis.sql`\n\n")
-        
-        f.write(f"## Próximos Pasos\n\n")
-        f.write(f"1. Revisar los archivos SQL generados\n")
-        f.write(f"2. Ejecutar las vistas Silver en cada proyecto de compañía\n")
-        f.write(f"3. Crear las vistas consolidadas en el proyecto central\n")
     
-    # Actualizar estados de compañías procesadas
-    print(f"\n📊 Actualizando estados de consolidación...")
-    for _, company in pending_companies.iterrows():
-        company_id = company['company_id']
-        company_name = company['company_name']
-        
-        # Verificar si la compañía fue procesada exitosamente
-        company_success = True
-        for table_name in tables_to_process:
-            if table_name in all_results:
-                # Verificar si esta compañía tiene datos para esta tabla
-                company_has_table = any(
-                    result['company_id'] == company_id 
-                    for result in all_results[table_name]['company_results']
-                )
-                if not company_has_table:
-                    # No es un error si la compañía no tiene cierta tabla
-                    continue
-        
-        # Actualizar estado
-        if company_success:
-            status_manager.update_company_status(company_id, status_manager.STATUS['COMPLETED'])
-            # print(f"  ✅ {company_name}: Estado actualizado a COMPLETED")
-        else:
-            status_manager.update_company_status(company_id, status_manager.STATUS['ERROR'])
-            print(f"  ❌ {company_name}: Estado actualizado a ERROR")
-    
-    # Mostrar resumen de estados
-    status_manager.print_consolidation_summary()
-    
-    # Mostrar reporte de consolidación
-    tracking_manager.print_consolidation_report()
-    
-    # Mostrar resumen de tablas saltadas
-    print(f"\n📋 RESUMEN DE TABLAS:")
-    print("=" * 50)
-    
-    processed_count = 0
-    skipped_count = 0
+    # Mostrar resumen final
+    print(f"\n📊 RESUMEN FINAL:")
+    print("=" * 80)
     
     for table_name in all_tables:
         completion_status = tracking_manager.get_table_completion_status(table_name)
-        
-        if not force_recreate and completion_status['is_fully_consolidated']:
-            skipped_count += 1
-            print(f"  ⏭️  {table_name}: SALTADA - 100% consolidada")
-        else:
-            processed_count += 1
-            if force_recreate:
-                print(f"  🔄 {table_name}: RECREADA - {completion_status['completion_rate']:.1f}% completada")
-            else:
-                print(f"  🔄 {table_name}: PROCESADA - {completion_status['completion_rate']:.1f}% completada")
+        print(f"  🔄 {table_name}: {completion_status['completion_rate']:.1f}% completada")
     
-    print(f"\n🎯 GENERACIÓN COMPLETADA")
+    print(f"\n🎯 CLOUD RUN JOB COMPLETADO")
     print(f"📁 Directorio: {output_dir}")
-    print(f"📊 Tablas procesadas: {processed_count}")
-    print(f"⏭️  Tablas saltadas: {skipped_count}")
+    print(f"📊 Tablas procesadas: {len(all_results)}")
     print(f"📄 Resumen: {summary_filename}")
     print(f"📊 Tracking: Tabla companies_consolidated actualizada")
     
@@ -729,19 +659,24 @@ def generate_all_silver_views(force_recreate=False):
 if __name__ == "__main__":
     import sys
     
-    # Verificar si se solicita recreación forzada
-    force_recreate = len(sys.argv) > 1 and sys.argv[1].lower() in ['--force', '-f', 'force']
+    # Detectar argumentos de línea de comandos
+    force_mode = len(sys.argv) > 1 and sys.argv[1].lower() in ['--force', '-f', 'force']
+    start_letter = sys.argv[2] if len(sys.argv) > 2 else 'a'
     
-    if force_recreate:
-        print("🔄 MODO FORZADO ACTIVADO: Recreando todas las vistas Silver")
-        print("⚠️  ADVERTENCIA: Esto puede tomar mucho tiempo")
+    if force_mode:
+        print("🔄 MODO FORZADO ACTIVADO")
+        print("⚠️  ADVERTENCIA: Recreará todas las vistas Silver")
         confirm = input("¿Continuar? (y/N): ").strip().lower()
         if confirm != 'y':
             print("❌ Operación cancelada")
             sys.exit(0)
     
     # Ejecutar generación
-    results, output_dir = generate_all_silver_views(force_recreate=force_recreate)
+    results, output_dir = generate_all_silver_views(
+        force_mode=force_mode,
+        start_from_letter=start_letter
+    )
     
-    print(f"\n✅ Script completado exitosamente!")
-    print(f"📁 Revisa los archivos en: {output_dir}")
+    print(f"\n✅ Proceso completado exitosamente!")
+    print(f"📁 Archivos generados en: {output_dir}")
+

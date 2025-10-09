@@ -12,5 +12,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY *.py ./
 
-# Comando por defecto
-CMD ["python", "generate_silver_views_job.py"]
+# Comando por defecto - Ejecuta main.py (entry point para Cloud Run Job)
+CMD ["python", "main.py"]
