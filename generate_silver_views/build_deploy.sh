@@ -34,8 +34,8 @@ echo "   Service Account: ${SERVICE_ACCOUNT}"
 echo ""
 
 # Verificar que estamos en el directorio correcto
-if [ ! -f "generate_silver_views_job.py" ]; then
-    echo "❌ Error: generate_silver_views_job.py no encontrado. Ejecuta este script desde el directorio consolidated_central_project_data/"
+if [ ! -f "main.py" ]; then
+    echo "❌ Error: main.py no encontrado. Ejecuta este script desde generate_silver_views/"
     exit 1
 fi
 
