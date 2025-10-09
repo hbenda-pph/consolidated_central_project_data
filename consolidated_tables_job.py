@@ -26,10 +26,12 @@ def get_metadata_dict():
             table_name,
             partition_fields,
             cluster_fields
-        FROM `{PROJECT_SOURCE}.{DATASET_MANAGEMENT}.metadata_consolidated_tables`
+        FROM `{PROJECT_CENTRAL}.{DATASET_MANAGEMENT}.metadata_consolidated_tables`
         WHERE is_active = TRUE
         ORDER BY table_name
     """
+    
+    print(f"📋 Cargando metadatos desde: {PROJECT_CENTRAL}.{DATASET_MANAGEMENT}.metadata_consolidated_tables")
     
     try:
         query_job = client.query(query)
@@ -151,6 +153,41 @@ def get_companies_for_table(table_name):
         print(f"  ⚠️  Error obteniendo compañías: {str(e)}")
         return pd.DataFrame()
 
+def detect_partition_field(table_name, sample_company_project_id):
+    """Detecta un campo de fecha apropiado para particionar"""
+    # Lista de campos comunes de fecha (en orden de preferencia)
+    date_fields = ['created_on', 'created_at', 'date', 'timestamp', 'modified_on', 'updated_on']
+    
+    try:
+        # Obtener schema de la vista
+        schema_query = f"""
+            SELECT column_name, data_type
+            FROM `{sample_company_project_id}.silver.INFORMATION_SCHEMA.COLUMNS`
+            WHERE table_name = 'vw_{table_name}'
+              AND data_type IN ('TIMESTAMP', 'DATETIME', 'DATE')
+            ORDER BY ordinal_position
+        """
+        
+        query_job = client.query(schema_query)
+        results = query_job.result()
+        date_columns = [row.column_name for row in results]
+        
+        # Buscar el primer campo de fecha común
+        for field in date_fields:
+            if field in date_columns:
+                return field
+        
+        # Si no encontró ninguno común, usar el primero disponible
+        if date_columns:
+            return date_columns[0]
+        
+        # Sin campos de fecha
+        return None
+        
+    except Exception as e:
+        print(f"    ⚠️  No se pudo detectar campo de fecha: {str(e)}")
+        return None
+
 def create_consolidated_table(table_name, companies_df, metadata_dict):
     """Crea una tabla consolidada para una tabla específica"""
     
@@ -161,11 +198,23 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
     # Obtener metadatos
     if table_name in metadata_dict:
         metadata = metadata_dict[table_name]
-        partition_field = metadata['partition_fields'][0] if metadata['partition_fields'] else 'created_on'
+        partition_field = metadata['partition_fields'][0] if metadata['partition_fields'] else None
         cluster_fields = metadata['cluster_fields'] if metadata['cluster_fields'] else ['company_id']
     else:
-        partition_field = 'created_on'
+        print(f"  ⚠️  Tabla '{table_name}' NO está en metadatos")
+        partition_field = None
         cluster_fields = ['company_id']
+    
+    # Si no hay partition_field, intentar detectarlo
+    if not partition_field:
+        print(f"  🔍 Detectando campo de particionamiento automáticamente...")
+        partition_field = detect_partition_field(table_name, companies_df.iloc[0]['company_project_id'])
+        
+        if not partition_field:
+            print(f"  ❌ ERROR: No se encontró campo de fecha para particionar")
+            print(f"     Solución: Agregar tabla '{table_name}' a metadata_consolidated_tables")
+            print(f"     con un partition_field apropiado (created_on, created_at, etc.)")
+            return False
     
     # Construir UNION ALL
     union_parts = []
@@ -181,7 +230,7 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
     # Configurar clusterizado
     cluster_sql = f"CLUSTER BY {', '.join(cluster_fields)}" if cluster_fields else ""
     
-    # SQL completo - PARTICIONADO POR MES para evitar límite de 4000 particiones
+    # SQL completo - SIEMPRE con particionamiento por MES
     create_sql = f"""
     CREATE OR REPLACE TABLE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
     PARTITION BY DATE_TRUNC({partition_field}, MONTH)
