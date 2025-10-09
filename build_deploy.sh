@@ -12,6 +12,11 @@ JOB_NAME="generate-silver-views-job"
 REGION="us-east1"
 SERVICE_ACCOUNT="data-analytics@${PROJECT_ID}.iam.gserviceaccount.com"
 IMAGE_TAG="gcr.io/${PROJECT_ID}/${JOB_NAME}"
+MEMORY="4Gi"
+CPU="4"
+MAX_RETRIES="3"
+PARALLELISM="2"
+TASK_TIMEOUT="7200"
 
 echo "🚀 Iniciando Build & Deploy para Generate Silver Views Job"
 echo "======================================================="
@@ -20,6 +25,11 @@ echo "   Proyecto: ${PROJECT_ID}"
 echo "   Job: ${JOB_NAME}"
 echo "   Región: ${REGION}"
 echo "   Imagen: ${IMAGE_TAG}"
+echo "   Memory: ${IMAGE_TAG}"
+echo "   CPU:    ${IMAGE_TAG}"
+echo "   Max Retries:  ${IMAGE_TAG}"
+echo "   Parallelism:  ${IMAGE_TAG}"
+echo "   Task Timeout: ${IMAGE_TAG}"
 echo "   Service Account: ${SERVICE_ACCOUNT}"
 echo ""
 
@@ -65,11 +75,11 @@ if gcloud run jobs describe ${JOB_NAME} --region=${REGION} &> /dev/null; then
     gcloud run jobs update ${JOB_NAME} \
         --image ${IMAGE_TAG} \
         --region ${REGION} \
-        --memory 4Gi \
-        --cpu 2 \
-        --max-retries 3 \
-        --parallelism 1 \
-        --task-timeout 1800 \
+        --memory ${MEMORY} \
+        --cpu ${CPU} \
+        --max-retries ${MAX_RETRIES} \
+        --parallelism ${PARALLELISM} \
+        --task-timeout ${TASK_TIMEOUT} \
         --set-env-vars PYTHONUNBUFFERED=1 \
         --service-account ${SERVICE_ACCOUNT}
 else
@@ -77,11 +87,11 @@ else
     gcloud run jobs create ${JOB_NAME} \
         --image ${IMAGE_TAG} \
         --region ${REGION} \
-        --memory 4Gi \
-        --cpu 2 \
-        --max-retries 3 \
-        --parallelism 1 \
-        --task-timeout 1800 \
+        --memory ${MEMORY} \
+        --cpu ${CPU} \
+        --max-retries ${MAX_RETRIES} \
+        --parallelism ${PARALLELISM} \
+        --task-timeout ${TASK_TIMEOUT} \
         --set-env-vars PYTHONUNBUFFERED=1 \
         --service-account ${SERVICE_ACCOUNT}
 fi

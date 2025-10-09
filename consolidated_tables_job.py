@@ -5,9 +5,11 @@ Versión NO INTERACTIVA - Procesa todas las tablas disponibles
 """
 
 from google.cloud import bigquery
+from google.cloud import bigquery_datatransfer_v1
 import pandas as pd
 from datetime import datetime
 import sys
+import json
 
 # Configuración
 PROJECT_SOURCE = 'platform-partners-des'
@@ -16,8 +18,9 @@ DATASET_BRONZE = 'bronze'
 DATASET_SILVER = 'silver'
 DATASET_MANAGEMENT = 'management'
 
-# Cliente BigQuery
+# Clientes BigQuery
 client = bigquery.Client(project=PROJECT_CENTRAL)
+transfer_client = bigquery_datatransfer_v1.DataTransferServiceClient()
 
 def get_metadata_dict():
     """Obtiene metadatos de particionamiento y clusterizado"""
@@ -266,10 +269,115 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
         return True
     except Exception as e:
         error_msg = str(e)
-        # Truncar mensaje de error si es muy largo
-        if len(error_msg) > 200:
-            error_msg = error_msg[:200] + "..."
-        print(f"  ❌ Error: {error_msg}")
+        
+        # Detectar tipo de error específico
+        if "Cannot replace a table with a different" in error_msg:
+            print(f"  ⚠️  TABLA NO ACTUALIZADA: La tabla existente tiene configuración incompatible")
+            print(f"     Razón: Cambio de esquema de particionamiento (día→mes) o estructura")
+            print(f"     Acción: La tabla antigua se mantiene intacta (seguro)")
+            print(f"     Para actualizar: Eliminar manualmente cuando no haya dependencias")
+        elif "Unrecognized name" in error_msg:
+            campo_error = error_msg.split("Unrecognized name: ")[1].split(" ")[0] if "Unrecognized name: " in error_msg else "desconocido"
+            print(f"  ❌ ERROR: Campo '{campo_error}' no existe en las vistas Silver")
+            print(f"     Solución: Verificar partition_fields en metadatos para '{table_name}'")
+        elif "Too many partitions" in error_msg:
+            print(f"  ❌ ERROR: Demasiadas particiones (límite: 4000)")
+            print(f"     Solución: Cambiar particionamiento a YEAR o filtrar datos históricos")
+        else:
+            # Error genérico - mostrar primeras 300 caracteres
+            if len(error_msg) > 300:
+                error_msg = error_msg[:300] + "..."
+            print(f"  ❌ ERROR: {error_msg}")
+        
+        return False
+
+def create_or_update_scheduled_query(table_name, companies_df, partition_field):
+    """
+    Crea o actualiza un Scheduled Query para refresh diario de la tabla consolidada
+    
+    NOTA: Esta función crea la configuración del scheduled query.
+    Para que funcione completamente, se requiere:
+    1. Habilitar BigQuery Data Transfer API
+    2. Permisos del Service Account en todos los proyectos de compañías
+    """
+    display_name = f"refresh_consolidated_{table_name}"
+    
+    # Construir query de refresh incremental (últimos 7 días)
+    union_parts = []
+    for _, company in companies_df.iterrows():
+        union_part = f"""
+        SELECT 
+          '{company['company_project_id']}' AS company_project_id,
+          {company['company_id']} AS company_id,
+          *
+        FROM `{company['company_project_id']}.{DATASET_SILVER}.vw_{table_name}`
+        WHERE {partition_field} >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)"""
+        union_parts.append(union_part)
+    
+    refresh_sql = f"""
+-- Refresh incremental de últimos 7 días para {table_name}
+-- Generado automáticamente
+DELETE FROM `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
+WHERE {partition_field} >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY);
+
+INSERT INTO `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
+{' UNION ALL '.join(union_parts)};
+"""
+    
+    try:
+        parent = f"projects/{PROJECT_CENTRAL}/locations/us"
+        
+        # Configuración del scheduled query
+        transfer_config = bigquery_datatransfer_v1.TransferConfig(
+            display_name=display_name,
+            data_source_id="scheduled_query",
+            schedule="every day 02:00",
+            params={
+                "query": refresh_sql,
+                "write_disposition": "WRITE_TRUNCATE"
+            }
+        )
+        
+        # Buscar si ya existe
+        list_request = bigquery_datatransfer_v1.ListTransferConfigsRequest(
+            parent=parent,
+            data_source_ids=["scheduled_query"]
+        )
+        
+        existing_config = None
+        for config in transfer_client.list_transfer_configs(request=list_request):
+            if config.display_name == display_name:
+                existing_config = config
+                break
+        
+        if existing_config:
+            # Actualizar existente
+            transfer_config.name = existing_config.name
+            update_mask = {"paths": ["schedule", "params"]}
+            transfer_client.update_transfer_config(
+                transfer_config=transfer_config,
+                update_mask=update_mask
+            )
+            print(f"  🔄 Scheduled Query actualizado")
+        else:
+            # Crear nuevo
+            transfer_client.create_transfer_config(
+                parent=parent,
+                transfer_config=transfer_config
+            )
+            print(f"  ✅ Scheduled Query creado")
+        
+        return True
+        
+    except Exception as e:
+        error_str = str(e)
+        if "API has not been used" in error_str or "not been enabled" in error_str:
+            print(f"  ⚠️  BigQuery Data Transfer API no habilitada")
+            print(f"     Habilitar: gcloud services enable bigquerydatatransfer.googleapis.com")
+        else:
+            print(f"  ⚠️  Error creando Scheduled Query: {error_str[:250]}")
+        
+        print(f"     Tabla creada OK - Scheduled Query se puede crear manualmente después")
         return False
 
 def main():
@@ -302,6 +410,9 @@ def main():
     success_count = 0
     error_count = 0
     skipped_count = 0
+    incompatible_count = 0
+    error_tables = []
+    incompatible_tables = []
     
     for i, table_name in enumerate(available_tables, 1):
         print(f"\n[{i}/{len(available_tables)}] {table_name}")
@@ -315,26 +426,49 @@ def main():
             continue
         
         # Crear tabla consolidada
-        success = create_consolidated_table(table_name, companies_df, metadata_dict)
+        table_created = create_consolidated_table(table_name, companies_df, metadata_dict)
         
-        if success:
+        if table_created:
             success_count += 1
+            
+            # Obtener partition_field para el scheduled query
+            if table_name in metadata_dict:
+                metadata = metadata_dict[table_name]
+                partition_fields_list = list(metadata['partition_fields']) if metadata['partition_fields'] else []
+                partition_field = partition_fields_list[0] if partition_fields_list else None
+            else:
+                partition_field = None
+            
+            # Crear scheduled query solo si hay partition_field
+            if partition_field:
+                print(f"  📅 Configurando refresh automático...")
+                create_or_update_scheduled_query(table_name, companies_df, partition_field)
+            else:
+                print(f"  ⚠️  Sin partition_field - No se crea scheduled query")
         else:
             error_count += 1
+            error_tables.append(table_name)
     
     # 4. Resumen final
     print("\n" + "=" * 80)
     print("🎯 RESUMEN FINAL")
     print("=" * 80)
-    print(f"✅ Tablas creadas exitosamente: {success_count}")
+    print(f"✅ Tablas creadas/actualizadas: {success_count}")
     print(f"❌ Tablas con errores: {error_count}")
-    print(f"⏭️  Tablas saltadas: {skipped_count}")
+    print(f"⏭️  Tablas saltadas (sin compañías): {skipped_count}")
     print(f"📊 Total procesadas: {success_count + error_count + skipped_count}")
     print(f"⏱️  Fecha fin: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
     
+    if error_tables:
+        print(f"\n⚠️  TABLAS CON ERRORES ({len(error_tables)}):")
+        for table in error_tables:
+            print(f"   - {table}")
+        print(f"\n💡 NOTA: Revisa los logs arriba para detalles de cada error")
+        print(f"   Las tablas con 'configuración incompatible' mantienen su versión anterior")
+    
     if error_count > 0:
-        print("\n⚠️  Algunas tablas tuvieron errores. Revisa los logs arriba.")
+        print(f"\n⚠️  Job completado con {error_count} error(es)")
         sys.exit(1)
     else:
         print("\n✅ ¡Todas las tablas se crearon exitosamente!")

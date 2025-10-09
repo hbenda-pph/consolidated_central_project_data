@@ -464,8 +464,13 @@ def generate_all_silver_views_job():
     print(f"✅ Compañías encontradas: {len(companies_df)}")
     
     # Usar TODAS las tablas de configuración
-    all_tables = TABLES_TO_PROCESS
-    print(f"📋 Tablas a procesar: {len(all_tables)}")
+    # 🔧 FILTRO TEMPORAL: Para reiniciar desde donde se cayó por timeout
+    # Cambia la letra según necesites (ej: 'a', 'i', 'm', etc.)
+    START_FROM_LETTER = 'a'  # ← CAMBIAR AQUÍ para reiniciar desde cierta tabla
+    
+    all_tables = [t for t in TABLES_TO_PROCESS if t >= START_FROM_LETTER]
+    print(f"🔍 FILTRO ACTIVO: Procesando tablas desde '{START_FROM_LETTER}'")
+    print(f"📋 Tablas a procesar: {len(all_tables)} de {len(TABLES_TO_PROCESS)} totales")
     
     all_results = {}
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
