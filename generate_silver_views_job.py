@@ -202,16 +202,6 @@ def generate_silver_view_sql(table_analysis, company_result):
     """
     Genera el SQL para crear una vista Silver para una compañía específica
     Incluye normalización de tipos de datos
-    
-    🚧 TEMPORAL: Las vistas actualmente INCLUYEN company_project_id y company_id
-    Estos campos SON METADATA DE CONSOLIDACIÓN y NO deberían estar aquí.
-    
-    🔮 FUTURO: ELIMINAR estos campos de las vistas Silver:
-    Las vistas individuales NO deberían tener campos de metadata.
-    Estos campos se agregan en el Paso 3 durante la consolidación.
-    
-    Para corregir en el futuro, ELIMINAR estas líneas del código donde se agreguen
-    company_project_id y company_id a las vistas individuales.
     """
     table_name = table_analysis['table_name']
     company_name = company_result['company_name']
@@ -224,17 +214,6 @@ def generate_silver_view_sql(table_analysis, company_result):
     
     silver_fields = []
     processed_fields = set()  # Para evitar duplicados
-    
-    # 🚧 TEMPORAL: Las vistas actualmente TIENEN company_project_id y company_id (INCORRECTO)
-    # Estos campos están siendo agregados desde algún lugar del código
-    # 
-    # 🔮 FUTURO: ENCONTRAR Y ELIMINAR dónde se agregan estos campos:
-    # BUSCAR en el código líneas como:
-    #   - silver_fields.insert(...company_project_id...)
-    #   - silver_fields.append(...company_id...)
-    #   - O en el SQL template del CREATE VIEW
-    #
-    # Y ELIMINARLAS para que las vistas individuales NO tengan metadata de consolidación
     
     # CRÍTICO: Primero procesar campos CON conflictos (tienen prioridad)
     # Si un campo tiene conflicto en CUALQUIER compañía, TODAS deben usar el consensus_type

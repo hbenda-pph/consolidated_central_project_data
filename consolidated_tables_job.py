@@ -60,55 +60,26 @@ def get_metadata_dict():
         return {}
 
 def get_available_tables():
-    """Obtiene lista de tablas que tienen vistas Silver disponibles"""
-    # Obtener lista de compañías activas
-    companies_query = f"""
-        SELECT DISTINCT company_project_id
-        FROM `{PROJECT_SOURCE}.settings.companies`
-        WHERE company_fivetran_status = TRUE
-          AND company_bigquery_status = TRUE
-          AND company_project_id IS NOT NULL
+    """
+    Obtiene lista de tablas desde METADATOS (no desde vistas Silver)
+    Los metadatos son la GUÍA del proceso
+    """
+    query = f"""
+        SELECT table_name
+        FROM `{PROJECT_CENTRAL}.{DATASET_MANAGEMENT}.metadata_consolidated_tables`
+        ORDER BY table_name
     """
     
     try:
-        # Obtener compañías
-        query_job = client.query(companies_query)
+        query_job = client.query(query)
         results = query_job.result()
-        companies = [row.company_project_id for row in results]
+        tables = [row.table_name for row in results]
         
-        if not companies:
-            print("❌ No se encontraron compañías activas")
-            return []
-        
-        print(f"📊 Analizando {len(companies)} compañías...")
-        
-        # Recopilar todas las tablas únicas de todas las compañías
-        all_tables = set()
-        
-        for company_project_id in companies:
-            try:
-                # Buscar vistas Silver en esta compañía
-                tables_query = f"""
-                    SELECT DISTINCT REPLACE(table_name, 'vw_', '') as table_name
-                    FROM `{company_project_id}.silver.INFORMATION_SCHEMA.TABLES`
-                    WHERE table_name LIKE 'vw_%'
-                """
-                
-                query_job = client.query(tables_query)
-                results = query_job.result()
-                company_tables = [row.table_name for row in results]
-                all_tables.update(company_tables)
-                
-            except Exception as e:
-                # Saltar compañías con errores (ej: sin dataset silver)
-                continue
-        
-        tables = sorted(list(all_tables))
-        print(f"✅ Tablas disponibles: {len(tables)}")
+        print(f"✅ Tablas desde metadatos: {len(tables)}")
         return tables
         
     except Exception as e:
-        print(f"❌ Error obteniendo tablas: {str(e)}")
+        print(f"❌ Error obteniendo tablas desde metadatos: {str(e)}")
         return []
 
 def get_companies_for_table(table_name):
@@ -260,30 +231,14 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
             print(f"     con un partition_field apropiado (created_on, created_at, etc.)")
             return False
     
-    # Construir UNION ALL
-    # 🚧 TEMPORAL: Las vistas Silver actualmente YA incluyen company_project_id y company_id (INCORRECTO)
-    # Por ahora, usamos EXCEPT para evitar duplicados
-    # 
-    # 🔮 FUTURO: Cuando se corrija el Paso 2 (generate_silver_views) para NO incluir
-    # estos campos metadata en las vistas individuales, descomentar esta versión:
-    #
-    # union_part = f"""
-    #     SELECT 
-    #       '{company['company_project_id']}' AS company_project_id,
-    #       {company['company_id']} AS company_id,
-    #       *
-    #     FROM `{company['company_project_id']}.{DATASET_SILVER}.vw_{table_name}`"""
-    #
-    # RAZÓN: Los campos company_project_id y company_id son METADATA de consolidación,
-    # NO deberían estar en vistas individuales de cada compañía (solo en la consolidada)
-    
+    # Construir UNION ALL con metadata de compañía
     union_parts = []
     for _, company in companies_df.iterrows():
         union_part = f"""
         SELECT 
           '{company['company_project_id']}' AS company_project_id,
           {company['company_id']} AS company_id,
-          * EXCEPT(company_project_id, company_id)
+          *
         FROM `{company['company_project_id']}.{DATASET_SILVER}.vw_{table_name}`"""
         union_parts.append(union_part)
     
