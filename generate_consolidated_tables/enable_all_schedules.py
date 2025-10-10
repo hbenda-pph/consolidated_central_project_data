@@ -54,20 +54,24 @@ def enable_all_scheduled_queries():
         
         for config in schedules_to_enable:
             try:
-                # Calcular start_time: Hoy 7pm CST (1am UTC del día siguiente)
-                cst = pytz.timezone('America/Chicago')
-                now_cst = datetime.now(cst)
+                # Calcular start_time: Hoy 7pm CST/CDT
+                # America/Chicago maneja automáticamente DST (Daylight Saving Time)
+                chicago_tz = pytz.timezone('America/Chicago')
+                now_chicago = datetime.now(chicago_tz)
                 
-                # Establecer a las 7pm CST de hoy
-                target_time = now_cst.replace(hour=19, minute=0, second=0, microsecond=0)
+                # Establecer a las 7pm hora de Chicago
+                target_time = now_chicago.replace(hour=19, minute=0, second=0, microsecond=0)
                 
                 # Si ya pasaron las 7pm, programar para mañana
-                if now_cst.hour >= 19:
+                if now_chicago.hour >= 19:
                     target_time += timedelta(days=1)
+                
+                # Convertir a UTC para BigQuery
+                target_time_utc = target_time.astimezone(pytz.UTC)
                 
                 # Convertir a timestamp Unix
                 start_timestamp = Timestamp()
-                start_timestamp.FromSeconds(int(target_time.timestamp()))
+                start_timestamp.FromSeconds(int(target_time_utc.timestamp()))
                 
                 # Crear ScheduleOptions con start_time
                 schedule_options = bigquery_datatransfer_v1.ScheduleOptions(
@@ -103,15 +107,18 @@ def enable_all_scheduled_queries():
         
         if enabled_count > 0:
             # Mostrar hora programada
-            cst = pytz.timezone('America/Chicago')
-            now_cst = datetime.now(cst)
-            target_time = now_cst.replace(hour=19, minute=0, second=0, microsecond=0)
-            if now_cst.hour >= 19:
+            chicago_tz = pytz.timezone('America/Chicago')
+            now_chicago = datetime.now(chicago_tz)
+            target_time = now_chicago.replace(hour=19, minute=0, second=0, microsecond=0)
+            if now_chicago.hour >= 19:
                 target_time += timedelta(days=1)
+            
+            target_time_utc = target_time.astimezone(pytz.UTC)
             
             print()
             print("🎉 ¡LISTO! Todos los Scheduled Queries están ahora ACTIVOS")
-            print(f"⏰ Primera ejecución: {target_time.strftime('%Y-%m-%d %I:%M %p CST')}")
+            print(f"⏰ Primera ejecución (Chicago): {target_time.strftime('%Y-%m-%d %I:%M %p %Z')}")
+            print(f"⏰ Primera ejecución (UTC):     {target_time_utc.strftime('%Y-%m-%d %I:%M %p %Z')}")
             print("📅 Luego correrán cada 6 horas automáticamente")
             print()
         
