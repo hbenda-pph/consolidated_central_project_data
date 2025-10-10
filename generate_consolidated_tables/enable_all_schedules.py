@@ -54,17 +54,10 @@ def enable_all_scheduled_queries():
         
         for config in schedules_to_enable:
             try:
-                # Calcular start_time: Hoy 7pm CST/CDT
-                # America/Chicago maneja automáticamente DST (Daylight Saving Time)
+                # Establecer hoy a las 7pm Chicago
                 chicago_tz = pytz.timezone('America/Chicago')
-                now_chicago = datetime.now(chicago_tz)
-                
-                # Establecer a las 7pm hora de Chicago
-                target_time = now_chicago.replace(hour=19, minute=0, second=0, microsecond=0)
-                
-                # Si ya pasaron las 7pm, programar para mañana
-                if now_chicago.hour >= 19:
-                    target_time += timedelta(days=1)
+                today = datetime.now(chicago_tz).date()
+                target_time = chicago_tz.localize(datetime.combine(today, datetime.strptime('19:00', '%H:%M').time()))
                 
                 # Convertir a UTC para BigQuery
                 target_time_utc = target_time.astimezone(pytz.UTC)
@@ -108,11 +101,8 @@ def enable_all_scheduled_queries():
         if enabled_count > 0:
             # Mostrar hora programada
             chicago_tz = pytz.timezone('America/Chicago')
-            now_chicago = datetime.now(chicago_tz)
-            target_time = now_chicago.replace(hour=19, minute=0, second=0, microsecond=0)
-            if now_chicago.hour >= 19:
-                target_time += timedelta(days=1)
-            
+            today = datetime.now(chicago_tz).date()
+            target_time = chicago_tz.localize(datetime.combine(today, datetime.strptime('19:00', '%H:%M').time()))
             target_time_utc = target_time.astimezone(pytz.UTC)
             
             print()
