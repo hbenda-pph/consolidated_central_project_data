@@ -266,7 +266,7 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
         query_job = client.query(create_sql)
         query_job.result()
         print(f"  ✅ Tabla creada exitosamente")
-        return True
+        return True, partition_field, cluster_fields
     except Exception as e:
         error_msg = str(e)
         
@@ -289,7 +289,7 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
                 error_msg = error_msg[:300] + "..."
             print(f"  ❌ ERROR: {error_msg}")
         
-        return False
+        return False, None, []
 
 def create_or_update_scheduled_query(table_name, companies_df, partition_field, cluster_fields):
     """
@@ -441,19 +441,11 @@ def create_all_consolidated_tables(create_schedules=True):
             skipped_count += 1
             continue
         
-        # Crear tabla consolidada
-        table_created = create_consolidated_table(table_name, companies_df, metadata_dict)
+        # Crear tabla consolidada (retorna éxito, partition_field, cluster_fields)
+        table_created, partition_field, cluster_fields = create_consolidated_table(table_name, companies_df, metadata_dict)
         
         if table_created:
             success_count += 1
-            
-            # Obtener partition_field para el scheduled query
-            if table_name in metadata_dict:
-                metadata = metadata_dict[table_name]
-                partition_fields_list = list(metadata['partition_fields']) if metadata['partition_fields'] else []
-                partition_field = partition_fields_list[0] if partition_fields_list else None
-            else:
-                partition_field = None
             
             # Crear scheduled query solo si hay partition_field y está habilitado
             if create_schedules and partition_field:
