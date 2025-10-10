@@ -291,7 +291,7 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
         
         return False
 
-def create_or_update_scheduled_query(table_name, companies_df, partition_field):
+def create_or_update_scheduled_query(table_name, companies_df, partition_field, cluster_fields):
     """
     Crea o actualiza un Scheduled Query para refresh diario de la tabla consolidada
     
@@ -458,7 +458,7 @@ def create_all_consolidated_tables(create_schedules=True):
             # Crear scheduled query solo si hay partition_field y está habilitado
             if create_schedules and partition_field:
                 print(f"  📅 Configurando refresh automático...")
-                create_or_update_scheduled_query(table_name, companies_df, partition_field)
+                create_or_update_scheduled_query(table_name, companies_df, partition_field, cluster_fields)
             elif not partition_field:
                 print(f"  ⚠️  Sin partition_field - No se crea scheduled query")
             elif not create_schedules:
