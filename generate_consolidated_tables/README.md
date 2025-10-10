@@ -349,7 +349,7 @@ El Job crea **Scheduled Queries deshabilitados** para mantener sincronización p
 - **Prefijo:** `sq_consolidated_*` (ej: `sq_consolidated_appointment`)
 - **Frecuencia:** Cada 6 horas (aligned con Fivetran)
 - **Estado inicial:** PAUSADO (disabled)
-- **Estrategia:** `DELETE + INSERT` con filtro de fecha para eficiencia
+- **Estrategia:** `CREATE OR REPLACE TABLE` - Recrea tabla completa con particionamiento optimizado
 
 ### ✅ Habilitar Scheduled Queries (Post-Job)
 
@@ -394,13 +394,27 @@ bq update --transfer_config \
 Después de crear las tablas consolidadas en Bronze:
 
 1. **Paso 3.1:** ✅ Habilitar Scheduled Queries para refresh automático
-2. **Paso 4:** Crear vistas consolidadas en `pph-central.silver`
-3. **Paso 5:** Configurar permisos para usuarios finales
-4. **Paso 6:** Crear dashboards en Looker/Tableau
+2. **Paso 3.2 (Mejora futura):** ⚡ Migrar de Scheduled Queries a **Materialized Views** para mayor eficiencia
+3. **Paso 4:** Crear vistas consolidadas en `pph-central.silver`
+4. **Paso 5:** Configurar permisos para usuarios finales
+5. **Paso 6:** Crear dashboards en Looker/Tableau
+
+### 💡 Mejora Futura - Materialized Views:
+
+**Ventajas:**
+- ✅ Auto-refresh inteligente (BigQuery decide cuándo)
+- ✅ Incremental automático (solo actualiza lo que cambió)
+- ✅ Más eficiente y menor costo
+- ✅ Sin necesidad de Scheduled Queries ni DTS permissions
+
+**Por qué no ahora:**
+- Necesitamos validar comportamiento con 30+ compañías y 42 tablas
+- Scheduled Queries dan control preciso de timing (sincronizado con Fivetran)
 
 ---
 
 **Fecha de creación:** 2025-10-08  
-**Versión:** 2.0  
+**Última actualización:** 2025-10-10  
+**Versión:** 2.1 (CREATE OR REPLACE, preparado para Materialized Views)  
 **Autor:** Data Engineering Team
 

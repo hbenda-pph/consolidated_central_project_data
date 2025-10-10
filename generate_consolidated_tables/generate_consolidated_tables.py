@@ -318,21 +318,16 @@ def create_or_update_scheduled_query(table_name, companies_df, partition_field):
     
     refresh_sql = f"""
 /*
- * Refresh completo para {table_name} usando MERGE
- * Clave única compuesta: company_project_id + id
- * Sin filtro temporal para capturar cualquier actualización histórica
+ * Refresh completo para {table_name}
+ * Recrea la tabla completa desde las vistas Silver
+ * Mantiene particionamiento y clusterizado originales
  * Generado automáticamente
  */
-MERGE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}` AS target
-USING (
-  {' UNION ALL '.join(union_parts)}
-) AS source
-ON target.company_project_id = source.company_project_id
-  AND target.id = source.id
-WHEN MATCHED THEN
-  UPDATE SET *
-WHEN NOT MATCHED THEN
-  INSERT *;
+CREATE OR REPLACE TABLE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
+PARTITION BY DATE_TRUNC({partition_field}, MONTH)
+CLUSTER BY ({', '.join(cluster_fields)})
+AS
+{' UNION ALL '.join(union_parts)};
 """
     
     try:
@@ -345,8 +340,8 @@ WHEN NOT MATCHED THEN
             schedule="every 6 hours",  # Corre cada 6 horas (aligned con Fivetran)
             disabled=True,  # Crear DESHABILITADO para sincronización perfecta
             params={
-                "query": refresh_sql,
-                "write_disposition": "WRITE_TRUNCATE"
+                "query": refresh_sql
+                # No se especifica write_disposition porque CREATE OR REPLACE maneja el reemplazo
             }
         )
         
