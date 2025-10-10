@@ -34,10 +34,15 @@ Este Cloud Run Job crea **tablas consolidadas optimizadas** en `pph-central.bron
 
 ### Proyecto y Datasets
 
-- **Proyecto Central:** `pph-central`
-- **Dataset Bronze:** `bronze` (tablas consolidadas)
-- **Proyecto Source:** `platform-partners-pro` (metadatos y companies)
-- **Dataset Silver:** `silver` (vistas por compañía)
+**Proyecto Central (`pph-central`) - 100% del Job:**
+- **Dataset Settings:** `settings` - Configuración de compañías (maestro de 30 compañías)
+- **Dataset Management:** `management` - Metadatos de tablas (partition, cluster, gobierno)
+- **Dataset Bronze:** `bronze` - Tablas consolidadas destino
+
+**Proyectos de Compañías (shape-mhs-1, shape-chc-2, etc.):**
+- **Dataset Silver:** `silver` - Vistas normalizadas por compañía (fuente de datos)
+
+**Nota:** Este Job NO depende de `platform-partners-des` (separación de ambientes) ✅
 
 ### Service Account
 

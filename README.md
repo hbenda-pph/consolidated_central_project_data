@@ -227,20 +227,39 @@ Contiene archivos obsoletos, scripts de prueba y debugging que no son necesarios
 
 ---
 
-## 🔄 Migraciones Pendientes (A Futuro)
+## 🔄 Arquitectura de Datos - Separación de Ambientes
 
-### **Migrar Jobs a `pph-central`:**
+### **Proyecto Central (`pph-central`) - Producción de Consolidación:**
 
-Actualmente:
-- ✅ **Paso 3** (`generate_consolidated_tables`) → Ya en `pph-central` ✅
-- ⚠️ **Paso 2** (`generate_silver_views`) → Aún en `platform-partners-des`
+**Dataset `settings` (Configuración de Compañías):**
+- ✅ `companies` - Maestro oficial de compañías (30 compañías activas)
+- ✅ `companies_consolidated` - Log de consolidación por compañía×tabla
 
-**A futuro:**
-1. Migrar `generate_silver_views` Job a `pph-central`
-2. Migrar tabla `companies_consolidated` de `platform-partners-des` a `pph-central.management`
-3. Unificar todos los metadatos en `pph-central.management`
+**Dataset `management` (Metadatos y Gobierno):**
+- ✅ `metadata_consolidated_tables` - Metadatos de tablas (partition, cluster, políticas)
 
-**Razón:** Los procesos de consolidación deben vivir en el proyecto central, no en desarrollo.
+**Dataset `bronze` (Datos Consolidados):**
+- ✅ Tablas consolidadas optimizadas (particionadas y clusterizadas)
+
+**Función:** Ambiente productivo de consolidación - 100% independiente de desarrollo
+
+---
+
+### **Proyecto Desarrollo (`platform-partners-des`):**
+
+- ⚠️ Aún contiene el Job de **Paso 2** (`generate_silver_views`)
+- 📝 Mantiene copias originales de tablas de configuración
+
+**A futuro:** Migrar Paso 2 a `pph-central` para completar la separación
+
+---
+
+### **Proyectos de Compañías (`shape-*`):**
+
+**Dataset `bronze`:** Datos RAW de ServiceTitan (vía Fivetran)
+**Dataset `silver`:** Vistas normalizadas (generadas por Paso 2)
+
+**Función:** Fuente de datos operativos por compañía
 
 ---
 

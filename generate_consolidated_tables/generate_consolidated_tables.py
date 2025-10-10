@@ -12,11 +12,11 @@ import sys
 import json
 
 # Configuración
-PROJECT_SOURCE = 'platform-partners-des'
-PROJECT_CENTRAL = 'pph-central'
-DATASET_BRONZE = 'bronze'
-DATASET_SILVER = 'silver'
-DATASET_MANAGEMENT = 'management'
+PROJECT_CENTRAL = 'pph-central'            # Proyecto central único
+DATASET_SETTINGS = 'settings'              # Configuración de compañías
+DATASET_BRONZE = 'bronze'                  # Tablas consolidadas destino
+DATASET_SILVER = 'silver'                  # Vistas Silver (en proyectos shape-*)
+DATASET_MANAGEMENT = 'management'          # Metadatos y gobierno
 
 # Clientes BigQuery
 client = bigquery.Client(project=PROJECT_CENTRAL)
@@ -92,7 +92,7 @@ def get_companies_for_table(table_name):
             company_id,
             company_name,
             company_project_id
-        FROM `{PROJECT_SOURCE}.settings.companies`
+        FROM `{PROJECT_CENTRAL}.{DATASET_SETTINGS}.companies`
         WHERE company_fivetran_status = TRUE
           AND company_bigquery_status = TRUE
           AND company_project_id IS NOT NULL
