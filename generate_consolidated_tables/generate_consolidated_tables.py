@@ -300,9 +300,11 @@ def create_or_update_scheduled_query(table_name, companies_df, partition_field):
     1. Habilitar BigQuery Data Transfer API
     2. Permisos del Service Account en todos los proyectos de compañías
     """
-    display_name = f"refresh_consolidated_{table_name}"
+    display_name = f"sq_consolidated_{table_name}"
     
-    # Construir query de refresh incremental (últimos 7 días)
+    # Construir query de refresh con MERGE (atómico y seguro)
+    # Clave compuesta: company_project_id + id (único en tabla consolidada)
+    
     union_parts = []
     for _, company in companies_df.iterrows():
         union_part = f"""
@@ -315,13 +317,19 @@ def create_or_update_scheduled_query(table_name, companies_df, partition_field):
         union_parts.append(union_part)
     
     refresh_sql = f"""
--- Refresh incremental de últimos 7 días para {table_name}
+-- Refresh incremental de últimos 7 días para {table_name} usando MERGE
+-- Clave única compuesta: company_project_id + id
 -- Generado automáticamente
-DELETE FROM `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
-WHERE {partition_field} >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY);
-
-INSERT INTO `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
-{' UNION ALL '.join(union_parts)};
+MERGE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}` AS target
+USING (
+  {' UNION ALL '.join(union_parts)}
+) AS source
+ON target.company_project_id = source.company_project_id
+  AND target.id = source.id
+WHEN MATCHED THEN
+  UPDATE SET *
+WHEN NOT MATCHED THEN
+  INSERT *;
 """
     
     try:
