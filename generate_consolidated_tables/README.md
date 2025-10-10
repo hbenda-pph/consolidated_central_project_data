@@ -23,8 +23,11 @@ Este Cloud Run Job crea **tablas consolidadas optimizadas** en `pph-central.bron
    - Obtener compañías que tienen la vista
    - Construir UNION ALL de todas las vistas
    - Crear tabla con PARTITION BY y CLUSTER BY
+   - Crear Scheduled Query (DESHABILITADO) para refresh cada 6 horas
    ↓
 4. Resumen final (éxitos, errores, saltadas)
+   ↓
+5. Instrucciones para habilitar Scheduled Queries sincronizados
 ```
 
 ## 🔧 Configuración
@@ -39,13 +42,15 @@ Este Cloud Run Job crea **tablas consolidadas optimizadas** en `pph-central.bron
 ### Service Account
 
 ```
-data-analytics@platform-partners-pro.iam.gserviceaccount.com
+data-consolidation@pph-central.iam.gserviceaccount.com
 ```
 
 **Permisos requeridos:**
-- ✅ `bigquery.dataViewer` en proyectos de compañías
-- ✅ `bigquery.dataEditor` en `pph-central` (para crear tablas)
+- ✅ `bigquery.dataViewer` en proyectos de compañías (para leer vistas Silver)
 - ✅ `bigquery.jobUser` en todos los proyectos
+- ✅ `bigquery.dataEditor` en `pph-central` (para crear tablas consolidadas)
+- ✅ `bigquery.admin` en `pph-central` (para crear Scheduled Queries en Data Transfer)
+- ✅ `iam.serviceAccountTokenCreator` para DTS Service Agent
 
 ### Recursos del Job
 
@@ -56,18 +61,52 @@ data-analytics@platform-partners-pro.iam.gserviceaccount.com
 
 ## 🚀 Despliegue
 
+### Paso 0: Crear Service Account (Solo primera vez)
+
+```bash
+# 1. Crear service account en pph-central
+gcloud iam service-accounts create data-consolidation \
+  --display-name="Data Consolidation Service Account" \
+  --project=pph-central
+
+# 2. Otorgar permisos BigQuery Admin en pph-central
+gcloud projects add-iam-policy-binding pph-central \
+  --member="serviceAccount:data-consolidation@pph-central.iam.gserviceaccount.com" \
+  --role="roles/bigquery.admin"
+
+# 3. Otorgar permisos de lectura en proyectos de compañías
+# Opción A: Script automático (recomendado)
+chmod +x grant_permissions.sh
+./grant_permissions.sh
+
+# Opción B: Manual (repetir para cada proyecto: shape-mhs-1, shape-chc-2, etc.)
+gcloud projects add-iam-policy-binding shape-mhs-1 \
+  --member="serviceAccount:data-consolidation@pph-central.iam.gserviceaccount.com" \
+  --role="roles/bigquery.dataViewer"
+
+# 4. Obtener PROJECT_NUMBER de pph-central
+gcloud projects describe pph-central --format="value(projectNumber)"
+
+# 5. Permiso para DTS Service Agent (reemplaza PROJECT_NUMBER)
+gcloud iam service-accounts add-iam-policy-binding \
+  data-consolidation@pph-central.iam.gserviceaccount.com \
+  --member="serviceAccount:service-PROJECT_NUMBER@gcp-sa-bigquerydatatransfer.iam.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountTokenCreator" \
+  --project=pph-central
+```
+
 ### Paso 1: Build y Deploy
 
 ```bash
-cd bq_management/consolidated_central_project_data
-chmod +x build_deploy_consolidated.sh
-./build_deploy_consolidated.sh
+cd bq_management/consolidated_central_project_data/generate_consolidated_tables
+chmod +x build_deploy.sh
+./build_deploy.sh
 ```
 
 Este script:
-1. Crea imagen Docker con `consolidated_tables_job.py`
+1. Crea imagen Docker con `generate_consolidated_tables.py`
 2. Sube la imagen a `gcr.io/pph-central/create-consolidated-tables-job`
-3. Crea/actualiza el Cloud Run Job
+3. Crea/actualiza el Cloud Run Job con la nueva Service Account
 
 ### Paso 2: Ejecutar el Job
 
@@ -296,17 +335,67 @@ gcloud run jobs executions list \
   --project=pph-central
 ```
 
+## ⏰ Scheduled Queries - Refresh Automático
+
+El Job crea **Scheduled Queries deshabilitados** para mantener sincronización perfecta.
+
+### 📋 Características:
+
+- **Prefijo:** `sq_consolidated_*` (ej: `sq_consolidated_appointment`)
+- **Frecuencia:** Cada 6 horas (aligned con Fivetran)
+- **Estado inicial:** PAUSADO (disabled)
+- **Estrategia:** `DELETE + INSERT` con filtro de fecha para eficiencia
+
+### ✅ Habilitar Scheduled Queries (Post-Job)
+
+**Opción 1: Script Python (Recomendado)**
+
+```bash
+cd bq_management/consolidated_central_project_data
+python generate_consolidated_tables/enable_all_schedules.py
+```
+
+Este script habilitará **todos** los schedules a la vez, garantizando sincronización perfecta.
+
+**Opción 2: Manual en BigQuery Console**
+
+1. Ve a **BigQuery Console → Data Transfers**
+2. Filtra por `sq_consolidated_`
+3. Habilita cada uno manualmente (uno por uno)
+
+### 🔄 Sincronización con Fivetran
+
+- **Fivetran:** Corre cada 6 horas (12:00 AM, 6:00 AM, 12:00 PM, 6:00 PM UTC)
+- **Scheduled Queries:** Empiezan 1 hora después cuando los habilites
+- **Ejemplo:** Si habilitas a las 7:00 AM UTC, próxima ejecución: 1:00 PM UTC
+
+### 🛠️ Gestión de Schedules
+
+**Ver todos los schedules:**
+```bash
+bq ls --transfer_config --transfer_location=us --project_id=pph-central
+```
+
+**Deshabilitar un schedule específico:**
+```bash
+bq update --transfer_config \
+  --display_name=sq_consolidated_appointment \
+  --disabled \
+  --project_id=pph-central
+```
+
 ## 🎯 Próximos Pasos
 
 Después de crear las tablas consolidadas en Bronze:
 
-1. **Paso 4:** Crear vistas consolidadas en `pph-central.silver`
-2. **Paso 5:** Configurar permisos para usuarios finales
-3. **Paso 6:** Crear dashboards en Looker/Tableau
+1. **Paso 3.1:** ✅ Habilitar Scheduled Queries para refresh automático
+2. **Paso 4:** Crear vistas consolidadas en `pph-central.silver`
+3. **Paso 5:** Configurar permisos para usuarios finales
+4. **Paso 6:** Crear dashboards en Looker/Tableau
 
 ---
 
 **Fecha de creación:** 2025-10-08  
-**Versión:** 1.0  
+**Versión:** 2.0  
 **Autor:** Data Engineering Team
 

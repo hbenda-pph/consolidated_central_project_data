@@ -227,5 +227,22 @@ Contiene archivos obsoletos, scripts de prueba y debugging que no son necesarios
 
 ---
 
-**Última actualización:** 2025-10-09  
-**Versión:** 2.0 (Reorganizada)
+## 🔄 Migraciones Pendientes (A Futuro)
+
+### **Migrar Jobs a `pph-central`:**
+
+Actualmente:
+- ✅ **Paso 3** (`generate_consolidated_tables`) → Ya en `pph-central` ✅
+- ⚠️ **Paso 2** (`generate_silver_views`) → Aún en `platform-partners-des`
+
+**A futuro:**
+1. Migrar `generate_silver_views` Job a `pph-central`
+2. Migrar tabla `companies_consolidated` de `platform-partners-des` a `pph-central.management`
+3. Unificar todos los metadatos en `pph-central.management`
+
+**Razón:** Los procesos de consolidación deben vivir en el proyecto central, no en desarrollo.
+
+---
+
+**Última actualización:** 2025-10-10  
+**Versión:** 2.1 (Jobs en pph-central)

@@ -331,7 +331,8 @@ INSERT INTO `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
         transfer_config = bigquery_datatransfer_v1.TransferConfig(
             display_name=display_name,
             data_source_id="scheduled_query",
-            schedule="every day 02:00",
+            schedule="every 6 hours",  # Corre cada 6 horas (aligned con Fivetran)
+            disabled=True,  # Crear DESHABILITADO para sincronización perfecta
             params={
                 "query": refresh_sql,
                 "write_disposition": "WRITE_TRUNCATE"
@@ -477,6 +478,19 @@ def create_all_consolidated_tables(create_schedules=True):
             print(f"   - {table}")
         print(f"\n💡 NOTA: Revisa los logs arriba para detalles de cada error")
         print(f"   Las tablas con 'configuración incompatible' mantienen su versión anterior")
+    
+    # Instrucciones para Scheduled Queries
+    if create_schedules and success_count > 0:
+        print(f"\n" + "="*80)
+        print(f"🔔 IMPORTANTE: SCHEDULED QUERIES CREADOS DESHABILITADOS")
+        print(f"="*80)
+        print(f"📋 Total de Scheduled Queries creados: {success_count}")
+        print(f"⏸️  Estado: PAUSADOS (para sincronización perfecta)")
+        print(f"\n✅ SIGUIENTE PASO - Ejecuta este comando cuando quieras activarlos:")
+        print(f"   python generate_consolidated_tables/enable_all_schedules.py")
+        print(f"\n💡 Esto habilitará TODOS los schedules a la vez de forma sincronizada")
+        print(f"   Todos empezarán cada 6 horas desde el momento de activación")
+        print(f"="*80)
     
     # Retornar estadísticas
     return {

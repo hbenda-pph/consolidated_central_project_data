@@ -7,10 +7,10 @@
 set -e  # Salir si hay algún error
 
 # Configuración
-PROJECT_ID="platform-partners-des"
+PROJECT_ID="pph-central"
 JOB_NAME="create-consolidated-tables-job"
 REGION="us-east1"
-SERVICE_ACCOUNT="data-analytics@${PROJECT_ID}.iam.gserviceaccount.com"
+SERVICE_ACCOUNT="data-consolidation@pph-central.iam.gserviceaccount.com"
 IMAGE_TAG="gcr.io/${PROJECT_ID}/${JOB_NAME}"
 MEMORY="8Gi"
 CPU="4"
