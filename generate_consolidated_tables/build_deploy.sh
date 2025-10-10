@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# SCRIPT DE BUILD & DEPLOY PARA CONSOLIDATED TABLES JOB
+# SCRIPT DE BUILD & DEPLOY PARA GENERATE CONSOLIDATED TABLES JOB
 # =============================================================================
 
 set -e  # Salir si hay algún error
@@ -12,20 +12,30 @@ JOB_NAME="create-consolidated-tables-job"
 REGION="us-east1"
 SERVICE_ACCOUNT="data-analytics@${PROJECT_ID}.iam.gserviceaccount.com"
 IMAGE_TAG="gcr.io/${PROJECT_ID}/${JOB_NAME}"
+MEMORY="8Gi"
+CPU="4"
+MAX_RETRIES="3"
+PARALLELISM="1"
+TASK_TIMEOUT="7200"
 
-echo "🚀 Iniciando Build & Deploy para Consolidated Tables Job"
-echo "======================================================="
+echo "🚀 Iniciando Build & Deploy para Create Consolidated Tables Job"
+echo "================================================================"
 echo "📋 Configuración:"
 echo "   Proyecto: ${PROJECT_ID}"
 echo "   Job: ${JOB_NAME}"
 echo "   Región: ${REGION}"
 echo "   Imagen: ${IMAGE_TAG}"
+echo "   Memory: ${MEMORY}"
+echo "   CPU:    ${CPU}"
+echo "   Max Retries:  ${MAX_RETRIES}"
+echo "   Parallelism:  ${PARALLELISM}"
+echo "   Task Timeout: ${TASK_TIMEOUT}"
 echo "   Service Account: ${SERVICE_ACCOUNT}"
 echo ""
 
 # Verificar que estamos en el directorio correcto
-if [ ! -f "consolidated_tables_job.py" ]; then
-    echo "❌ Error: consolidated_tables_job.py no encontrado. Ejecuta este script desde generate_consolidated_tables/"
+if [ ! -f "main.py" ]; then
+    echo "❌ Error: main.py no encontrado. Ejecuta este script desde generate_consolidated_tables/"
     exit 1
 fi
 
@@ -65,11 +75,11 @@ if gcloud run jobs describe ${JOB_NAME} --region=${REGION} &> /dev/null; then
     gcloud run jobs update ${JOB_NAME} \
         --image ${IMAGE_TAG} \
         --region ${REGION} \
-        --memory 8Gi \
-        --cpu 4 \
-        --max-retries 3 \
-        --parallelism 1 \
-        --task-timeout 3600 \
+        --memory ${MEMORY} \
+        --cpu ${CPU} \
+        --max-retries ${MAX_RETRIES} \
+        --parallelism ${PARALLELISM} \
+        --task-timeout ${TASK_TIMEOUT} \
         --set-env-vars PYTHONUNBUFFERED=1 \
         --service-account ${SERVICE_ACCOUNT}
 else
@@ -77,11 +87,11 @@ else
     gcloud run jobs create ${JOB_NAME} \
         --image ${IMAGE_TAG} \
         --region ${REGION} \
-        --memory 8Gi \
-        --cpu 4 \
-        --max-retries 3 \
-        --parallelism 1 \
-        --task-timeout 3600 \
+        --memory ${MEMORY} \
+        --cpu ${CPU} \
+        --max-retries ${MAX_RETRIES} \
+        --parallelism ${PARALLELISM} \
+        --task-timeout ${TASK_TIMEOUT} \
         --set-env-vars PYTHONUNBUFFERED=1 \
         --service-account ${SERVICE_ACCOUNT}
 fi
@@ -98,11 +108,10 @@ echo "🎉 ¡DEPLOY COMPLETADO EXITOSAMENTE!"
 echo "===================================="
 echo ""
 echo "📊 Para ejecutar el job:"
-echo "   gcloud run jobs execute ${JOB_NAME} --region=${REGION} --project=${PROJECT_ID}"
+echo "   gcloud run jobs execute ${JOB_NAME} --region=${REGION}"
 echo ""
 echo "🔧 Para ver logs del job:"
-echo "   gcloud run jobs logs ${JOB_NAME} --region=${REGION} --project=${PROJECT_ID}"
+echo "   gcloud run jobs logs ${JOB_NAME} --region=${REGION}"
 echo ""
 echo "🛑 Para eliminar el job:"
-echo "   gcloud run jobs delete ${JOB_NAME} --region=${REGION} --project=${PROJECT_ID}"
-
+echo "   gcloud run jobs delete ${JOB_NAME} --region=${REGION}"

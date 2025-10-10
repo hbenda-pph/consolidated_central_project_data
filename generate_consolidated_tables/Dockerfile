@@ -10,8 +10,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY consolidated_tables_job.py .
+COPY *.py ./
 
-# Comando por defecto
-CMD ["python", "consolidated_tables_job.py"]
+# Comando por defecto - Ejecuta main.py (entry point para Cloud Run Job)
+CMD ["python", "main.py"]
 
