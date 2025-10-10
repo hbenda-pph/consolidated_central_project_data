@@ -5,7 +5,10 @@ Ejecutar después de que el Job principal haya creado las tablas y schedules
 """
 
 from google.cloud import bigquery_datatransfer_v1
-from datetime import datetime
+from google.protobuf.timestamp_pb2 import Timestamp
+from datetime import datetime, timedelta
+import time
+import pytz
 
 PROJECT_CENTRAL = "pph-central"
 
@@ -51,9 +54,25 @@ def enable_all_scheduled_queries():
         
         for config in schedules_to_enable:
             try:
-                # Actualizar solo el campo disabled
+                # Calcular start_time: Hoy 7pm CST (1am UTC del día siguiente)
+                cst = pytz.timezone('America/Chicago')
+                now_cst = datetime.now(cst)
+                
+                # Establecer a las 7pm CST de hoy
+                target_time = now_cst.replace(hour=19, minute=0, second=0, microsecond=0)
+                
+                # Si ya pasaron las 7pm, programar para mañana
+                if now_cst.hour >= 19:
+                    target_time += timedelta(days=1)
+                
+                # Convertir a timestamp Unix
+                start_timestamp = Timestamp()
+                start_timestamp.FromSeconds(int(target_time.timestamp()))
+                
                 config.disabled = False
-                update_mask = {"paths": ["disabled"]}
+                config.schedule_options.start_time = start_timestamp
+                
+                update_mask = {"paths": ["disabled", "schedule_options.start_time"]}
                 
                 transfer_client.update_transfer_config(
                     transfer_config=config,
@@ -78,10 +97,17 @@ def enable_all_scheduled_queries():
         print("=" * 80)
         
         if enabled_count > 0:
+            # Mostrar hora programada
+            cst = pytz.timezone('America/Chicago')
+            now_cst = datetime.now(cst)
+            target_time = now_cst.replace(hour=19, minute=0, second=0, microsecond=0)
+            if now_cst.hour >= 19:
+                target_time += timedelta(days=1)
+            
             print()
             print("🎉 ¡LISTO! Todos los Scheduled Queries están ahora ACTIVOS")
-            print("⏰ Correrán cada 6 horas desde este momento")
-            print(f"📅 Próxima ejecución: ~{datetime.now().strftime('%H:%M')} + 6 horas")
+            print(f"⏰ Primera ejecución: {target_time.strftime('%Y-%m-%d %I:%M %p CST')}")
+            print("📅 Luego correrán cada 6 horas automáticamente")
             print()
         
         return enabled_count, error_count
