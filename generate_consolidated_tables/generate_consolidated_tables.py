@@ -304,6 +304,7 @@ def create_or_update_scheduled_query(table_name, companies_df, partition_field):
     
     # Construir query de refresh con MERGE (atómico y seguro)
     # Clave compuesta: company_project_id + id (único en tabla consolidada)
+    # Sin filtro temporal - procesa TODAS las vistas para capturar cualquier actualización
     
     union_parts = []
     for _, company in companies_df.iterrows():
@@ -312,14 +313,16 @@ def create_or_update_scheduled_query(table_name, companies_df, partition_field):
           '{company['company_project_id']}' AS company_project_id,
           {company['company_id']} AS company_id,
           *
-        FROM `{company['company_project_id']}.{DATASET_SILVER}.vw_{table_name}`
-        WHERE {partition_field} >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)"""
+        FROM `{company['company_project_id']}.{DATASET_SILVER}.vw_{table_name}`"""
         union_parts.append(union_part)
     
     refresh_sql = f"""
--- Refresh incremental de últimos 7 días para {table_name} usando MERGE
--- Clave única compuesta: company_project_id + id
--- Generado automáticamente
+/*
+ * Refresh completo para {table_name} usando MERGE
+ * Clave única compuesta: company_project_id + id
+ * Sin filtro temporal para capturar cualquier actualización histórica
+ * Generado automáticamente
+ */
 MERGE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}` AS target
 USING (
   {' UNION ALL '.join(union_parts)}
