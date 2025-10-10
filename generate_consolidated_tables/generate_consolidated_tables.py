@@ -190,7 +190,7 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
     
     if companies_df.empty:
         print(f"  ❌ No hay compañías disponibles")
-        return False
+        return False, None, []
     
     # Obtener metadatos
     if table_name in metadata_dict:
@@ -232,7 +232,7 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
             print(f"  ❌ ERROR: No se encontró campo de fecha para particionar")
             print(f"     Solución: Agregar tabla '{table_name}' a metadata_consolidated_tables")
             print(f"     con un partition_field apropiado (created_on, created_at, etc.)")
-            return False
+            return False, None, []
     
     # Construir UNION ALL con metadata de compañía
     union_parts = []
