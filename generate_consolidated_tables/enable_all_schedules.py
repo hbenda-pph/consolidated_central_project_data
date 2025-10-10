@@ -69,10 +69,15 @@ def enable_all_scheduled_queries():
                 start_timestamp = Timestamp()
                 start_timestamp.FromSeconds(int(target_time.timestamp()))
                 
-                config.disabled = False
-                config.schedule_options.start_time = start_timestamp
+                # Crear ScheduleOptions con start_time
+                schedule_options = bigquery_datatransfer_v1.ScheduleOptions(
+                    start_time=start_timestamp
+                )
                 
-                update_mask = {"paths": ["disabled", "schedule_options.start_time"]}
+                config.disabled = False
+                config.schedule_options = schedule_options
+                
+                update_mask = {"paths": ["disabled", "schedule_options"]}
                 
                 transfer_client.update_transfer_config(
                     transfer_config=config,
