@@ -435,13 +435,14 @@ def get_default_value_for_type_with_cast(data_type):
     }
     return defaults.get(data_type, 'NULL')
 
-def generate_all_silver_views(force_mode=True, start_from_letter='a'):
+def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_table=None):
     """
-    Genera vistas Silver para todas las tablas
+    Genera vistas Silver para todas las tablas o una específica
     
     Args:
         force_mode (bool): Si True, procesa todas sin confirmación
         start_from_letter (str): Letra inicial para filtrar tablas (útil para reiniciar)
+        specific_table (str): Si se proporciona, genera solo esta tabla
     
     Returns:
         tuple: (all_results, output_dir)
@@ -475,13 +476,23 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a'):
     
     print(f"✅ Tablas encontradas dinámicamente: {len(all_tables_full)}")
     
-    # Aplicar filtro de letra inicial (útil para reiniciar después de timeout)
-    all_tables = [t for t in all_tables_full if t >= start_from_letter]
-    
-    if start_from_letter != 'a':
-        print(f"🔍 FILTRO ACTIVO: Procesando tablas desde '{start_from_letter}'")
-    
-    print(f"📋 Tablas a procesar: {len(all_tables)} de {len(all_tables_full)} totales")
+    # Filtrar tablas según los parámetros
+    if specific_table:
+        # Procesar solo una tabla específica
+        if specific_table in all_tables_full:
+            all_tables = [specific_table]
+            print(f"🎯 TABLA ESPECÍFICA: Procesando solo '{specific_table}'")
+        else:
+            print(f"❌ ERROR: La tabla '{specific_table}' no existe")
+            return {}, {}
+    else:
+        # Aplicar filtro de letra inicial
+        all_tables = [t for t in all_tables_full if t >= start_from_letter]
+        
+        if start_from_letter != 'a':
+            print(f"🔍 FILTRO ACTIVO: Procesando tablas desde '{start_from_letter}'")
+        
+        print(f"📋 Tablas a procesar: {len(all_tables)} de {len(all_tables_full)} totales")
     
     all_results = {}
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -658,12 +669,18 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a'):
 
 if __name__ == "__main__":
     import sys
+    import argparse
     
-    # Detectar argumentos de línea de comandos
-    force_mode = len(sys.argv) > 1 and sys.argv[1].lower() in ['--force', '-f', 'force']
-    start_letter = sys.argv[2] if len(sys.argv) > 2 else 'a'
+    # Configurar argumentos de línea de comandos
+    parser = argparse.ArgumentParser(description='Genera vistas Silver para ServiceTitan')
+    parser.add_argument('--force', '-f', action='store_true', help='Modo forzado: recrea todas las vistas sin confirmación')
+    parser.add_argument('--start-letter', '-s', default='a', help='Letra inicial para filtrar tablas (default: a)')
+    parser.add_argument('--table', '-t', help='Procesar solo una tabla específica')
+    parser.add_argument('--yes', '-y', action='store_true', help='Responder "sí" a todas las confirmaciones')
     
-    if force_mode:
+    args = parser.parse_args()
+    
+    if args.force and not args.yes:
         print("🔄 MODO FORZADO ACTIVADO")
         print("⚠️  ADVERTENCIA: Recreará todas las vistas Silver")
         confirm = input("¿Continuar? (y/N): ").strip().lower()
@@ -673,8 +690,9 @@ if __name__ == "__main__":
     
     # Ejecutar generación
     results, output_dir = generate_all_silver_views(
-        force_mode=force_mode,
-        start_from_letter=start_letter
+        force_mode=args.force,
+        start_from_letter=args.start_letter,
+        specific_table=args.table
     )
     
     print(f"\n✅ Proceso completado exitosamente!")

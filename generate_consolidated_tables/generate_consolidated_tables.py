@@ -387,12 +387,14 @@ AS
         print(f"     Tabla creada OK - Scheduled Query se puede crear manualmente después")
         return False
 
-def create_all_consolidated_tables(create_schedules=True):
+def create_all_consolidated_tables(create_schedules=True, start_from_letter='a', specific_table=None):
     """
     Función principal para crear tablas consolidadas
     
     Args:
         create_schedules (bool): Si True, crea scheduled queries para refresh automático
+        start_from_letter (str): Letra inicial para filtrar tablas (útil para reiniciar)
+        specific_table (str): Si se proporciona, genera solo esta tabla
         
     Returns:
         dict: Estadísticas de ejecución
@@ -411,13 +413,29 @@ def create_all_consolidated_tables(create_schedules=True):
     
     # 2. Obtener tablas disponibles
     print("\n📊 PASO 2: Obtener tablas con vistas Silver disponibles")
-    available_tables = get_available_tables()
+    all_tables = get_available_tables()
     
-    if not available_tables:
+    if not all_tables:
         print("❌ No se encontraron tablas disponibles")
         sys.exit(1)
     
-    print(f"\n📋 Tablas a procesar: {len(available_tables)}")
+    # Filtrar tablas según los parámetros
+    if specific_table:
+        # Procesar solo una tabla específica
+        if specific_table in all_tables:
+            available_tables = [specific_table]
+            print(f"🎯 TABLA ESPECÍFICA: Procesando solo '{specific_table}'")
+        else:
+            print(f"❌ ERROR: La tabla '{specific_table}' no existe")
+            sys.exit(1)
+    else:
+        # Aplicar filtro de letra inicial
+        available_tables = [t for t in all_tables if t >= start_from_letter]
+        
+        if start_from_letter != 'a':
+            print(f"🔍 FILTRO ACTIVO: Procesando tablas desde '{start_from_letter}'")
+        
+        print(f"📋 Tablas a procesar: {len(available_tables)} de {len(all_tables)} totales")
     
     # 3. Procesar cada tabla
     print("\n🔄 PASO 3: Crear tablas consolidadas")
@@ -501,12 +519,23 @@ def create_all_consolidated_tables(create_schedules=True):
 
 if __name__ == "__main__":
     import sys
+    import argparse
     
-    # Detectar si se quiere deshabilitar scheduled queries
-    create_schedules = '--no-schedules' not in sys.argv
+    # Configurar argumentos de línea de comandos
+    parser = argparse.ArgumentParser(description='Crea tablas consolidadas en pph-central.bronze')
+    parser.add_argument('--no-schedules', action='store_true', help='No crear Scheduled Queries para refresh automático')
+    parser.add_argument('--start-letter', '-s', default='a', help='Letra inicial para filtrar tablas (default: a)')
+    parser.add_argument('--table', '-t', help='Procesar solo una tabla específica')
+    parser.add_argument('--yes', '-y', action='store_true', help='Responder "sí" a todas las confirmaciones')
+    
+    args = parser.parse_args()
     
     try:
-        stats = create_all_consolidated_tables(create_schedules=create_schedules)
+        stats = create_all_consolidated_tables(
+            create_schedules=not args.no_schedules,
+            start_from_letter=args.start_letter,
+            specific_table=args.table
+        )
         
         if stats['error_count'] > 0:
             print(f"\n⚠️  Completado con {stats['error_count']} error(es)")
