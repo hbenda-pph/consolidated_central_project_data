@@ -70,11 +70,33 @@ def get_companies_info():
         print(f"❌ Error al obtener información de compañías: {str(e)}")
         raise
 
-def get_table_fields_with_types(project_id, table_name):
+def get_manual_table_name(table_name):
+    """
+    Obtiene el nombre de la tabla manual agregando 's' al final
+    Por ejemplo: 'campaign' -> 'campaigns'
+    
+    Las tablas manuales en bronze siempre terminan en 's' para
+    diferenciarlas de las tablas originales.
+    """
+    return f"{table_name}s"
+
+def get_table_fields_with_types(project_id, table_name, use_bronze=False):
     """
     Obtiene información de campos con tipos de datos de una tabla específica
+    
+    Args:
+        project_id: ID del proyecto
+        table_name: Nombre de la tabla
+        use_bronze: Si True, busca en dataset bronze, si False, en servicetitan_*
     """
-    dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
+    if use_bronze:
+        dataset_name = "bronze"
+        # Usar el nombre mapeado para tablas manuales
+        source_table = get_manual_table_name(table_name)
+    else:
+        dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
+        source_table = table_name
+        
     try:
         query = f"""
             SELECT
@@ -87,7 +109,7 @@ def get_table_fields_with_types(project_id, table_name):
                 column_default,
                 ordinal_position
             FROM `{project_id}.{dataset_name}.INFORMATION_SCHEMA.COLUMNS`
-            WHERE table_name = '{table_name}'
+            WHERE table_name = '{source_table}'
             ORDER BY ordinal_position
         """
 
@@ -99,9 +121,13 @@ def get_table_fields_with_types(project_id, table_name):
         print(f"⚠️  Error al obtener campos de {project_id}.{dataset_name}.{table_name}: {str(e)}")
         return pd.DataFrame()
 
-def analyze_table_fields_across_companies(table_name):
+def analyze_table_fields_across_companies(table_name, use_bronze=False):
     """
     Analiza los campos de una tabla específica en todas las compañías
+    
+    Args:
+        table_name: Nombre de la tabla a analizar
+        use_bronze: Si True, busca en dataset bronze, si False, en servicetitan_*
     """
     print(f"\n🔍 ANALIZANDO TABLA: {table_name}")
     print("=" * 80)
@@ -119,14 +145,16 @@ def analyze_table_fields_across_companies(table_name):
             continue
         
         # Obtener campos de la tabla
-        fields_df = get_table_fields_with_types(project_id, table_name)
+        fields_df = get_table_fields_with_types(project_id, table_name, use_bronze)
         
         if fields_df.empty:
-            print(f"  ⚠️  {company_name}: Tabla '{table_name}' no encontrada")
+            source_type = "manual (bronze)" if use_bronze else "original"
+            source_name = get_manual_table_name(table_name) if use_bronze else table_name
+            print(f"  ⚠️  {company_name}: Tabla {source_type} '{source_name}' no encontrada")
             continue
             
-        # Filtrar campos _fivetran (campos del ETL que deben quedarse solo en Bronze)
-        filtered_fields_df = fields_df[~fields_df['column_name'].str.startswith('_fivetran')]
+        # Filtrar campos de control del ETL (deben quedarse solo en Bronze)
+        filtered_fields_df = fields_df[~fields_df['column_name'].str.startswith('_')]
         fields_list = filtered_fields_df['column_name'].tolist()
         field_count = len(fields_list)
         
@@ -197,10 +225,15 @@ def analyze_table_fields_across_companies(table_name):
         'field_frequency': field_frequency
     }
 
-def generate_silver_view_sql(table_analysis, company_result):
+def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
     """
     Genera el SQL para crear una vista Silver para una compañía específica
     Incluye normalización de tipos de datos
+    
+    Args:
+        table_analysis: Análisis de la tabla
+        company_result: Información de la compañía
+        use_bronze: Si True, usa tabla de bronze en lugar de servicetitan_*
     """
     table_name = table_analysis['table_name']
     company_name = company_result['company_name']
@@ -210,6 +243,14 @@ def generate_silver_view_sql(table_analysis, company_result):
     company_fields_df = company_result['fields_df']
     company_fields = {row['column_name']: row['data_type'] for _, row in company_fields_df.iterrows()}
     company_field_names = set(company_fields.keys())
+    
+    # Determinar dataset y nombre de tabla fuente
+    if use_bronze:
+        source_dataset = "bronze"
+        source_table = get_manual_table_name(table_name)
+    else:
+        source_dataset = f"servicetitan_{project_id.replace('-', '_')}"
+        source_table = table_name
     
     silver_fields = []
     processed_fields = set()  # Para evitar duplicados
@@ -270,7 +311,6 @@ def generate_silver_view_sql(table_analysis, company_result):
         silver_fields.append(f"    {default_value} as {field_name}")
     
     # Crear SQL
-    dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
     view_name = f"vw_{table_name}"
     
     # Validar que hay campos para procesar
@@ -302,14 +342,18 @@ def generate_silver_view_sql(table_analysis, company_result):
     # Crear el contenido de campos con saltos de línea
     fields_content = '\n'.join(fields_with_commas)
     
+    # Agregar comentario específico para tablas manuales
+    source_comment = "tabla manual en bronze" if use_bronze else "tabla Fivetran"
+    
     sql = f"""-- Vista Silver para {company_name} - Tabla {table_name}
 -- Generada automáticamente el {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+-- Fuente: {source_comment}
 -- Incluye normalización de tipos de datos
 
 CREATE OR REPLACE VIEW `{project_id}.silver.{view_name}` AS (
 SELECT
 {fields_content}
-FROM `{project_id}.{dataset_name}.{table_name}`
+FROM `{project_id}.{source_dataset}.{source_table}`
 );
 """
     
@@ -435,7 +479,7 @@ def get_default_value_for_type_with_cast(data_type):
     }
     return defaults.get(data_type, 'NULL')
 
-def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_table=None):
+def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_table=None, use_bronze=False):
     """
     Genera vistas Silver para todas las tablas o una específica
     
@@ -443,12 +487,17 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
         force_mode (bool): Si True, procesa todas sin confirmación
         start_from_letter (str): Letra inicial para filtrar tablas (útil para reiniciar)
         specific_table (str): Si se proporciona, genera solo esta tabla
+        use_bronze (bool): Si True, usa tablas manuales de bronze en lugar de Fivetran
     
     Returns:
         tuple: (all_results, output_dir)
     """
+    # Determinar modo de operación
     mode_text = "FORZADO" if force_mode else "NORMAL"
-    print(f"🚀 GENERACIÓN DE VISTAS SILVER - MODO: {mode_text}")
+    source_text = "BRONZE (tablas manuales)" if use_bronze else "ORIGINAL (tablas ServiceTitan)"
+    print(f"🚀 GENERACIÓN DE VISTAS SILVER")
+    print(f"   Modo: {mode_text}")
+    print(f"   Fuente: {source_text}")
     print("=" * 80)
     
     # Inicializar gestor de tracking
@@ -464,14 +513,34 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
     
     print(f"✅ Compañías encontradas: {len(companies_df)}")
     
-    # Obtener tablas dinámicamente desde las compañías
+    # Obtener tablas dinámicamente
     print("📋 Obteniendo lista de tablas dinámicamente desde INFORMATION_SCHEMA...")
     
-    from config import get_tables_dynamically
-    all_tables_full = get_tables_dynamically()
+    if use_bronze:
+        # Obtener tablas desde bronze (terminan en 's')
+        query = f"""
+        SELECT table_name 
+        FROM `{companies_df.iloc[0]['company_project_id']}.bronze.INFORMATION_SCHEMA.TABLES`
+        WHERE table_name LIKE '%s'  -- Solo tablas que terminan en 's'
+        ORDER BY table_name
+        """
+        try:
+            query_job = client.query(query)
+            results = query_job.result()
+            # Quitar la 's' final para normalizar los nombres
+            all_tables_full = [row.table_name[:-1] for row in results]
+            print(f"✅ Tablas manuales encontradas en bronze: {len(all_tables_full)}")
+            print(f"   {', '.join(all_tables_full)}")
+        except Exception as e:
+            print(f"❌ Error obteniendo tablas de bronze: {str(e)}")
+            return {}, {}
+    else:
+        # Obtener tablas desde el proceso de extracción original
+        from config import get_tables_dynamically
+        all_tables_full = get_tables_dynamically()
     
     if not all_tables_full:
-        print("❌ ERROR: No se encontraron tablas en las compañías")
+        print("❌ ERROR: No se encontraron tablas")
         return {}, {}
     
     print(f"✅ Tablas encontradas dinámicamente: {len(all_tables_full)}")
@@ -515,7 +584,7 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
         print(f"     ⚠️  No existe: {completion_status['missing_count']}")
         
         # Analizar campos de la tabla
-        table_analysis = analyze_table_fields_across_companies(table_name)
+        table_analysis = analyze_table_fields_across_companies(table_name, use_bronze)
         
         if table_analysis is None:
             print(f"  ⏭️  Saltando tabla '{table_name}' - no se encontraron datos")
@@ -553,7 +622,7 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
             project_id = company_result['project_id']
             
             # Generar y ejecutar SQL directamente
-            sql_content = generate_silver_view_sql(table_analysis, company_result)
+            sql_content = generate_silver_view_sql(table_analysis, company_result, use_bronze)
             
             # Validar que se generó SQL válido
             if sql_content is None:
@@ -677,6 +746,8 @@ if __name__ == "__main__":
     parser.add_argument('--start-letter', '-s', default='a', help='Letra inicial para filtrar tablas (default: a)')
     parser.add_argument('--table', '-t', help='Procesar solo una tabla específica')
     parser.add_argument('--yes', '-y', action='store_true', help='Responder "sí" a todas las confirmaciones')
+    parser.add_argument('--bronze', '-b', action='store_true',
+        help='Usar tablas manuales de bronze en lugar de las originales. Se puede combinar con --force, --table y --start-letter')
     
     args = parser.parse_args()
     
@@ -692,7 +763,8 @@ if __name__ == "__main__":
     results, output_dir = generate_all_silver_views(
         force_mode=args.force,
         start_from_letter=args.start_letter,
-        specific_table=args.table
+        specific_table=args.table,
+        use_bronze=args.bronze
     )
     
     print(f"\n✅ Proceso completado exitosamente!")
