@@ -216,8 +216,15 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
                 else:
                     print(f"  ⚠️  Campo '{field}' no existe en la vista, probando siguiente...")
         
-        # CLUSTERIZADO: Usar todos los campos (hasta 4)
-        cluster_fields = cluster_fields_list[:4] if cluster_fields_list else ['company_id']
+        # CLUSTERIZADO: Filtrar campos con punto (no soportados) y usar hasta 4
+        valid_cluster_fields = []
+        for field in cluster_fields_list:
+            if '.' in field:
+                print(f"  ⚠️  Campo '{field}' ignorado para clustering (contiene '.')")
+                continue
+            valid_cluster_fields.append(field)
+        
+        cluster_fields = valid_cluster_fields[:4] if valid_cluster_fields else ['company_id']
     else:
         print(f"  ⚠️  Tabla '{table_name}' NO está en metadatos")
         partition_field = None
@@ -249,13 +256,30 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
     cluster_sql = f"CLUSTER BY {', '.join(cluster_fields)}" if cluster_fields else ""
     
     # SQL completo - SIEMPRE con particionamiento por MES
-    create_sql = f"""
-    CREATE OR REPLACE TABLE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
-    PARTITION BY DATE_TRUNC({partition_field}, MONTH)
-    {cluster_sql}
-    AS
-    {' UNION ALL '.join(union_parts)}
-    """
+    if table_name == 'campaign':
+        # Para campaign, extraer category.id en una subconsulta
+        create_sql = f"""
+        CREATE OR REPLACE TABLE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
+        PARTITION BY DATE_TRUNC({partition_field}, MONTH)
+        {cluster_sql}
+        AS
+        WITH source_data AS (
+            {' UNION ALL '.join(union_parts)}
+        )
+        SELECT 
+            *,
+            category.id as category_id  -- Extraer id del RECORD para clustering
+        FROM source_data
+        """
+    else:
+        # Para todas las demás tablas, SQL normal
+        create_sql = f"""
+        CREATE OR REPLACE TABLE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
+        PARTITION BY DATE_TRUNC({partition_field}, MONTH)
+        {cluster_sql}
+        AS
+        {' UNION ALL '.join(union_parts)}
+        """
     
     print(f"  🔄 Creando tabla: consolidated_{table_name}")
     print(f"     📊 Compañías: {len(companies_df)}")
@@ -316,7 +340,30 @@ def create_or_update_scheduled_query(table_name, companies_df, partition_field, 
         FROM `{company['company_project_id']}.{DATASET_SILVER}.vw_{table_name}`"""
         union_parts.append(union_part)
     
-    refresh_sql = f"""
+    if table_name == 'campaign':
+        # Para campaign, extraer category.id en una subconsulta
+        refresh_sql = f"""
+/*
+ * Refresh completo para {table_name}
+ * Recrea la tabla completa desde las vistas Silver
+ * Mantiene particionamiento y clusterizado originales
+ * Generado automáticamente
+ */
+CREATE OR REPLACE TABLE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
+PARTITION BY DATE_TRUNC({partition_field}, MONTH)
+CLUSTER BY ({', '.join(cluster_fields)})
+AS
+WITH source_data AS (
+    {' UNION ALL '.join(union_parts)}
+)
+SELECT 
+    *,
+    category.id as category_id  -- Extraer id del RECORD para clustering
+FROM source_data;
+"""
+    else:
+        # Para todas las demás tablas, SQL normal
+        refresh_sql = f"""
 /*
  * Refresh completo para {table_name}
  * Recrea la tabla completa desde las vistas Silver
