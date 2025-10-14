@@ -641,10 +641,8 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
                 try:
                     if attempt > 0:
                         print(f"    🔄 Reintento {attempt + 1}/{max_retries} para {company_name}")
-                        # Recrear cliente en caso de error de autenticación
-                        global client
-                        client = create_bigquery_client()
-                        time.sleep(2)  # Esperar antes del reintento
+                        # Esperar antes del reintento
+                        time.sleep(2)
                     
                     print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
                     query_job = client.query(sql_content)
