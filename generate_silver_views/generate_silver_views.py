@@ -119,6 +119,16 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
         
         print(f"\nCAMPOS ORIGINALES para {project_id}.{dataset_name}.{source_table}:")
         for _, row in fields_df.iterrows():
+            if row['data_type'].startswith('STRUCT<'):
+                print(f"  {row['column_name']}: {row['data_type']} ⚠️ Campo a aplanar")
+            else:
+                print(f"  {row['column_name']}: {row['data_type']}")
+        
+        # TODO: Aquí irá el código para aplanar los campos STRUCT
+        
+        print("\nCAMPOS DESPUÉS DE APLANAR:")
+        # Por ahora mostrar los mismos campos
+        for _, row in fields_df.iterrows():
             print(f"  {row['column_name']}: {row['data_type']}")
         
         return fields_df
