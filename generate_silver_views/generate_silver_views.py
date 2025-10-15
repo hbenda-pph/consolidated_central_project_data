@@ -117,13 +117,6 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
         results = query_job.result()
         fields_df = pd.DataFrame([dict(row) for row in results])
         
-        print(f"\nCAMPOS ORIGINALES para {project_id}.{dataset_name}.{source_table}:")
-        for _, row in fields_df.iterrows():
-            if row['data_type'].startswith('STRUCT<'):
-                print(f"  {row['column_name']}: {row['data_type']} ⚠️ Campo a aplanar")
-            else:
-                print(f"  {row['column_name']}: {row['data_type']}")
-        
         # Aplanar campos STRUCT
         flattened_fields = []
         for _, row in fields_df.iterrows():
@@ -144,11 +137,6 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
         
         # Actualizar el DataFrame con los campos aplanados
         fields_df = pd.DataFrame(flattened_fields)
-        
-        print("\nCAMPOS DESPUÉS DE APLANAR:")
-        # Por ahora mostrar los mismos campos
-        for _, row in fields_df.iterrows():
-            print(f"  {row['column_name']}: {row['data_type']}")
         
         return fields_df
     except Exception as e:
@@ -679,6 +667,7 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
                         time.sleep(2)
                     
                     print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
+                    print(f"\nSQL generado:\n{sql_content}\n")
                     query_job = client.query(sql_content)
                     query_job.result()  # Esperar a que termine
                     print(f"    ✅ Vista creada: {company_name}")
