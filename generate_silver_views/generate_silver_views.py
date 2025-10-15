@@ -127,7 +127,8 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
                 for struct_field in struct_fields:
                     name, type_info = struct_field.split(' ')
                     flattened_fields.append({
-                        'column_name': f"{row_dict['column_name']}_{name}",
+                        'column_name': f"{row_dict['column_name']}.{name}",  # Nombre original con punto
+                        'alias_name': f"{row_dict['column_name']}_{name}",  # Nombre aplanado para el alias
                         'data_type': type_info,
                         'is_nullable': row_dict['is_nullable'],
                         'ordinal_position': row_dict['ordinal_position']
@@ -263,7 +264,14 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
     
     # Obtener campos de esta compañía con sus tipos
     company_fields_df = company_result['fields_df']
-    company_fields = {row['column_name']: row['data_type'] for _, row in company_fields_df.iterrows()}
+    company_fields = {}
+    company_aliases = {}
+    for _, row in company_fields_df.iterrows():
+        field_name = row['column_name']
+        company_fields[field_name] = row['data_type']
+        # Si el campo tiene un alias (campos aplanados), guardarlo
+        if 'alias_name' in row:
+            company_aliases[field_name] = row['alias_name']
     company_field_names = set(company_fields.keys())
     
     # Determinar dataset y nombre de tabla fuente
@@ -295,7 +303,9 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
         
         # SIEMPRE aplicar cast para asegurar consistencia de tipos
         cast_expression = generate_cast_for_field(field_name, source_type, target_type)
-        silver_fields.append(f"    {cast_expression} as {field_name}")
+        # Usar el alias si existe, si no usar el nombre original
+        alias = company_aliases.get(field_name, field_name)
+        silver_fields.append(f"    {cast_expression} as {alias}")
         processed_fields.add(field_name)
     
     # 2. Procesar campos SIN conflictos (solo los que NO fueron procesados arriba)
@@ -313,7 +323,9 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
         
         # SIEMPRE aplicar cast para asegurar consistencia de tipos
         cast_expression = generate_cast_for_field(field_name, source_type, target_type)
-        silver_fields.append(f"    {cast_expression} as {field_name}")
+        # Usar el alias si existe, si no usar el nombre original
+        alias = company_aliases.get(field_name, field_name)
+        silver_fields.append(f"    {cast_expression} as {alias}")
         processed_fields.add(field_name)
     
     # 3. Procesar campos faltantes (con valores por defecto)
