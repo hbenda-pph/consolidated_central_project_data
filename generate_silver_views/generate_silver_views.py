@@ -122,10 +122,7 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
         for _, row in fields_df.iterrows():
             row_dict = row.to_dict()  # Convertir la fila a diccionario
             
-            # SIEMPRE agregar el campo original
-            flattened_fields.append(row_dict)
-            
-            # Si es STRUCT, agregar también los campos aplanados
+            # Si es STRUCT, agregar los campos aplanados
             if row_dict['data_type'].startswith('STRUCT<'):
                 # Extraer los subcampos del STRUCT
                 struct_fields = row_dict['data_type'].replace('STRUCT<', '').replace('>', '').split(', ')
@@ -138,6 +135,10 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
                         'is_nullable': row_dict['is_nullable'],
                         'ordinal_position': row_dict['ordinal_position']
                     })
+            else:
+                # Campos normales: asegurarnos que tengan el mismo nombre como alias
+                row_dict['alias_name'] = row_dict['column_name']  # El alias es el mismo nombre
+                flattened_fields.append(row_dict)
         
         # Actualizar el DataFrame con TODOS los campos
         fields_df = pd.DataFrame(flattened_fields)
