@@ -124,7 +124,25 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
             else:
                 print(f"  {row['column_name']}: {row['data_type']}")
         
-        # TODO: Aquí irá el código para aplanar los campos STRUCT
+        # Aplanar campos STRUCT
+        flattened_fields = []
+        for _, row in fields_df.iterrows():
+            if row['data_type'].startswith('STRUCT<'):
+                # Extraer los subcampos del STRUCT
+                struct_fields = row['data_type'].replace('STRUCT<', '').replace('>', '').split(', ')
+                for struct_field in struct_fields:
+                    name, type_info = struct_field.split(' ')
+                    flattened_fields.append({
+                        'column_name': f"{row['column_name']}_{name}",
+                        'data_type': type_info,
+                        'is_nullable': row['is_nullable'],
+                        'ordinal_position': row['ordinal_position']
+                    })
+            else:
+                flattened_fields.append(row)
+        
+        # Actualizar el DataFrame con los campos aplanados
+        fields_df = pd.DataFrame(flattened_fields)
         
         print("\nCAMPOS DESPUÉS DE APLANAR:")
         # Por ahora mostrar los mismos campos
