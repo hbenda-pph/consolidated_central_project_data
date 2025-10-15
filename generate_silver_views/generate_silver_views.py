@@ -116,6 +116,11 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
         query_job = client.query(query)
         results = query_job.result()
         fields_df = pd.DataFrame([dict(row) for row in results])
+        
+        print(f"\nCAMPOS ORIGINALES para {project_id}.{dataset_name}.{source_table}:")
+        for _, row in fields_df.iterrows():
+            print(f"  {row['column_name']}: {row['data_type']}")
+        
         return fields_df
     except Exception as e:
         print(f"⚠️  Error al obtener campos de {project_id}.{dataset_name}.{table_name}: {str(e)}")
