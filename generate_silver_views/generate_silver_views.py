@@ -517,7 +517,7 @@ def get_default_value_for_type_with_cast(data_type):
     }
     return defaults.get(data_type, 'NULL')
 
-def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_table=None, use_bronze=False):
+def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_table=None, use_bronze=False, specific_company_id=None):
     """
     Genera vistas Silver para todas las tablas o una específica
     
@@ -526,6 +526,7 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
         start_from_letter (str): Letra inicial para filtrar tablas (útil para reiniciar)
         specific_table (str): Si se proporciona, genera solo esta tabla
         use_bronze (bool): Si True, usa tablas manuales de bronze en lugar de Fivetran
+        specific_company_id (int): Si se proporciona, procesa solo esta compañía
     
     Returns:
         tuple: (all_results, output_dir)
@@ -541,15 +542,23 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
     # Inicializar gestor de tracking
     tracking_manager = ConsolidationTrackingManager()
     
-    # HARDCODED: Obtener TODAS las compañías activas (sin filtro de status)
-    print("📋 Obteniendo TODAS las compañías activas...")
+    # Obtener compañías
+    print("📋 Obteniendo compañías activas...")
     companies_df = get_companies_info()
     
     if companies_df.empty:
         print("❌ No hay compañías activas para procesar")
         return {}, {}
     
-    print(f"✅ Compañías encontradas: {len(companies_df)}")
+    # Filtrar por company_id si se especificó
+    if specific_company_id is not None:
+        companies_df = companies_df[companies_df['company_id'] == specific_company_id]
+        if companies_df.empty:
+            print(f"❌ ERROR: No se encontró la compañía con company_id={specific_company_id}")
+            return {}, {}
+        print(f"🎯 COMPAÑÍA ESPECÍFICA: Procesando solo company_id={specific_company_id} ({companies_df.iloc[0]['company_name']})")
+    else:
+        print(f"✅ Compañías encontradas: {len(companies_df)}")
     
     # Obtener tablas dinámicamente
     print("📋 Obteniendo lista de tablas dinámicamente desde INFORMATION_SCHEMA...")
@@ -782,9 +791,10 @@ if __name__ == "__main__":
     parser.add_argument('--force', '-f', action='store_true', help='Modo forzado: recrea todas las vistas sin confirmación')
     parser.add_argument('--start-letter', '-s', default='a', help='Letra inicial para filtrar tablas (default: a)')
     parser.add_argument('--table', '-t', help='Procesar solo una tabla específica')
+    parser.add_argument('--company-id', '-c', type=int, help='Procesar solo una compañía específica (por company_id)')
     parser.add_argument('--yes', '-y', action='store_true', help='Responder "sí" a todas las confirmaciones')
     parser.add_argument('--bronze', '-b', action='store_true',
-        help='Usar tablas manuales de bronze en lugar de las originales. Se puede combinar con --force, --table y --start-letter')
+        help='Usar tablas manuales de bronze en lugar de las originales. Se puede combinar con --force, --table, --company-id y --start-letter')
     
     args = parser.parse_args()
     
@@ -801,7 +811,8 @@ if __name__ == "__main__":
         force_mode=args.force,
         start_from_letter=args.start_letter,
         specific_table=args.table,
-        use_bronze=args.bronze
+        use_bronze=args.bronze,
+        specific_company_id=args.company_id
     )
     
     print(f"\n✅ Proceso completado exitosamente!")
