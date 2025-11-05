@@ -117,15 +117,23 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
         results = query_job.result()
         fields_df = pd.DataFrame([dict(row) for row in results])
         
-        # Aplanar campos STRUCT
+        # Aplanar campos STRUCT (pero NO ARRAY<STRUCT> que son REPEATED)
         flattened_fields = []
         for _, row in fields_df.iterrows():
             row_dict = row.to_dict()  # Convertir la fila a diccionario
+            data_type = row_dict['data_type']
             
-            # Si es STRUCT, agregar los campos aplanados
-            if row_dict['data_type'].startswith('STRUCT<'):
+            # Si es ARRAY<STRUCT<...>> (REPEATED RECORD), convertir a STRING
+            if data_type.startswith('ARRAY<STRUCT<'):
+                print(f"  ⚠️ Campo REPEATED RECORD detectado: {row_dict['column_name']} - Convirtiendo a JSON STRING")
+                row_dict['data_type'] = 'STRING'  # Lo trataremos como STRING (JSON)
+                row_dict['alias_name'] = row_dict['column_name']
+                row_dict['is_repeated_record'] = True  # Marcar para conversión especial
+                flattened_fields.append(row_dict)
+            # Si es STRUCT simple (no array), agregar los campos aplanados
+            elif data_type.startswith('STRUCT<'):
                 # Extraer los subcampos del STRUCT
-                struct_fields = row_dict['data_type'].replace('STRUCT<', '').replace('>', '').split(', ')
+                struct_fields = data_type.replace('STRUCT<', '').replace('>', '').split(', ')
                 for struct_field in struct_fields:
                     name, type_info = struct_field.split(' ')
                     flattened_fields.append({
@@ -272,12 +280,16 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
     company_fields_df = company_result['fields_df']
     company_fields = {}
     company_aliases = {}
+    company_repeated_records = {}  # Para campos ARRAY<STRUCT> que necesitan TO_JSON_STRING
     for _, row in company_fields_df.iterrows():
         field_name = row['column_name']
         company_fields[field_name] = row['data_type']
         # Si el campo tiene un alias (campos aplanados), guardarlo
         if 'alias_name' in row:
             company_aliases[field_name] = row['alias_name']
+        # Si es un REPEATED RECORD, marcarlo
+        if row.get('is_repeated_record', False):
+            company_repeated_records[field_name] = True
     company_field_names = set(company_fields.keys())
     
     # Determinar dataset y nombre de tabla fuente
@@ -307,8 +319,12 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
         if source_type is None:
             continue
         
-        # SIEMPRE aplicar cast para asegurar consistencia de tipos
-        cast_expression = generate_cast_for_field(field_name, source_type, target_type)
+        # Si es REPEATED RECORD, usar TO_JSON_STRING directamente
+        if field_name in company_repeated_records:
+            cast_expression = f"TO_JSON_STRING({field_name})"
+        else:
+            # SIEMPRE aplicar cast para asegurar consistencia de tipos
+            cast_expression = generate_cast_for_field(field_name, source_type, target_type)
         # Usar el alias si existe, si no usar el nombre original
         alias = company_aliases.get(field_name, field_name)
         silver_fields.append(f"    {cast_expression} as {alias}")
@@ -327,8 +343,12 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
         if source_type is None:
             continue
         
-        # SIEMPRE aplicar cast para asegurar consistencia de tipos
-        cast_expression = generate_cast_for_field(field_name, source_type, target_type)
+        # Si es REPEATED RECORD, usar TO_JSON_STRING directamente
+        if field_name in company_repeated_records:
+            cast_expression = f"TO_JSON_STRING({field_name})"
+        else:
+            # SIEMPRE aplicar cast para asegurar consistencia de tipos
+            cast_expression = generate_cast_for_field(field_name, source_type, target_type)
         # Usar el alias si existe, si no usar el nombre original
         alias = company_aliases.get(field_name, field_name)
         silver_fields.append(f"    {cast_expression} as {alias}")
