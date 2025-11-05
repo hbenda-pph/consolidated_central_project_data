@@ -339,9 +339,11 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
         # Si es REPEATED RECORD, usar TO_JSON_STRING directamente
         if field_name in company_repeated_records:
             cast_expression = f"TO_JSON_STRING({field_name})"
+            print(f"    🔍 [CONFLICTO] Campo {field_name}: REPEATED → TO_JSON_STRING")
         else:
             # SIEMPRE aplicar cast para asegurar consistencia de tipos
             cast_expression = generate_cast_for_field(field_name, source_type, target_type)
+            print(f"    🔍 [CONFLICTO] Campo {field_name}: {source_type} → {target_type} = {cast_expression[:50]}")
         # Usar el alias si existe, si no usar el nombre original
         alias = company_aliases.get(field_name, field_name)
         silver_fields.append(f"    {cast_expression} as {alias}")
@@ -363,9 +365,11 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
         # Si es REPEATED RECORD, usar TO_JSON_STRING directamente
         if field_name in company_repeated_records:
             cast_expression = f"TO_JSON_STRING({field_name})"
+            print(f"    🔍 [CONSENSO] Campo {field_name}: REPEATED → TO_JSON_STRING")
         else:
             # SIEMPRE aplicar cast para asegurar consistencia de tipos
             cast_expression = generate_cast_for_field(field_name, source_type, target_type)
+            print(f"    🔍 [CONSENSO] Campo {field_name}: {source_type} → {target_type} = {cast_expression[:50]}")
         # Usar el alias si existe, si no usar el nombre original
         alias = company_aliases.get(field_name, field_name)
         silver_fields.append(f"    {cast_expression} as {alias}")
@@ -731,6 +735,11 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
                         time.sleep(2)
                     
                     print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
+                    print(f"\n{'='*80}")
+                    print(f"SQL GENERADO:")
+                    print(f"{'='*80}")
+                    print(sql_content)
+                    print(f"{'='*80}\n")
                     query_job = client.query(sql_content)
                     query_job.result()  # Esperar a que termine
                     print(f"    ✅ Vista creada: {company_name}")
