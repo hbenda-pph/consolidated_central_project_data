@@ -148,18 +148,20 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
         print(f"⚠️  Error al obtener campos de {project_id}.{dataset_name}.{table_name}: {str(e)}")
         return pd.DataFrame()
 
-def analyze_table_fields_across_companies(table_name, use_bronze=False):
+def analyze_table_fields_across_companies(table_name, use_bronze=False, companies_df=None):
     """
     Analiza los campos de una tabla específica en todas las compañías
     
     Args:
         table_name: Nombre de la tabla a analizar
         use_bronze: Si True, busca en dataset bronze, si False, en servicetitan_*
+        companies_df: DataFrame de compañías a procesar (si None, obtiene todas)
     """
     print(f"\n🔍 ANALIZANDO TABLA: {table_name}")
     print("=" * 80)
     
-    companies_df = get_companies_info()
+    if companies_df is None:
+        companies_df = get_companies_info()
     table_analysis_results = []
     all_table_fields = set()
     
@@ -630,8 +632,8 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
         print(f"     ❌ Errores: {completion_status['error_count']}")
         print(f"     ⚠️  No existe: {completion_status['missing_count']}")
         
-        # Analizar campos de la tabla
-        table_analysis = analyze_table_fields_across_companies(table_name, use_bronze)
+        # Analizar campos de la tabla (pasar companies_df filtrado)
+        table_analysis = analyze_table_fields_across_companies(table_name, use_bronze, companies_df)
         
         if table_analysis is None:
             print(f"  ⏭️  Saltando tabla '{table_name}' - no se encontraron datos")
