@@ -24,6 +24,9 @@ warnings.filterwarnings('ignore')
 from config import *
 from consolidation_tracking_manager import ConsolidationTrackingManager
 
+# Variable global para modo debug
+DEBUG_MODE = False
+
 # Crear cliente BigQuery con reconexión automática
 def create_bigquery_client():
     """Crea cliente BigQuery con manejo de reconexión"""
@@ -128,7 +131,8 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
         repeated_results = repeated_job.result()
         repeated_fields = set([row.column_name for row in repeated_results])
         
-        print(f"  🔍 Campos REPEATED encontrados en INFORMATION_SCHEMA: {repeated_fields if repeated_fields else 'Ninguno'}")
+        if DEBUG_MODE:
+            print(f"  🔍 Campos REPEATED encontrados en INFORMATION_SCHEMA: {repeated_fields if repeated_fields else 'Ninguno'}")
         
         # Agregar columna is_repeated al DataFrame
         fields_df['is_repeated'] = fields_df['column_name'].apply(lambda x: x in repeated_fields)
@@ -142,7 +146,8 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
             
             # Si es REPEATED (ARRAY de cualquier cosa), convertir a JSON STRING
             if is_repeated:
-                print(f"  ⚠️ Campo REPEATED detectado: {row_dict['column_name']} (tipo: {data_type}) - Se convertirá a JSON STRING en la vista")
+                if DEBUG_MODE:
+                    print(f"  ⚠️ Campo REPEATED detectado: {row_dict['column_name']} (tipo: {data_type}) - Se convertirá a JSON STRING en la vista")
                 # NO cambiar el data_type aquí, mantener el original para el análisis
                 row_dict['alias_name'] = row_dict['column_name']
                 row_dict['is_repeated_record'] = True  # Marcar para conversión especial en SQL
@@ -311,7 +316,8 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
             company_repeated_records[field_name] = True
     company_field_names = set(company_fields.keys())
     
-    print(f"  🔍 DEBUG company_repeated_records: {company_repeated_records}")
+    if DEBUG_MODE:
+        print(f"  🔍 DEBUG company_repeated_records: {company_repeated_records}")
     
     # Determinar dataset y nombre de tabla fuente
     if use_bronze:
@@ -343,11 +349,13 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
         # Si es REPEATED RECORD, usar TO_JSON_STRING directamente
         if field_name in company_repeated_records:
             cast_expression = f"TO_JSON_STRING({field_name})"
-            print(f"    🔍 [CONFLICTO] Campo {field_name}: REPEATED → TO_JSON_STRING")
+            if DEBUG_MODE:
+                print(f"    🔍 [CONFLICTO] Campo {field_name}: REPEATED → TO_JSON_STRING")
         else:
             # SIEMPRE aplicar cast para asegurar consistencia de tipos
             cast_expression = generate_cast_for_field(field_name, source_type, target_type)
-            print(f"    🔍 [CONFLICTO] Campo {field_name}: {source_type} → {target_type} = {cast_expression[:50]}")
+            if DEBUG_MODE:
+                print(f"    🔍 [CONFLICTO] Campo {field_name}: {source_type} → {target_type} = {cast_expression[:50]}")
         # Usar el alias si existe, si no usar el nombre original
         alias = company_aliases.get(field_name, field_name)
         silver_fields.append(f"    {cast_expression} as {alias}")
@@ -369,11 +377,13 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
         # Si es REPEATED RECORD, usar TO_JSON_STRING directamente
         if field_name in company_repeated_records:
             cast_expression = f"TO_JSON_STRING({field_name})"
-            print(f"    🔍 [CONSENSO] Campo {field_name}: REPEATED → TO_JSON_STRING")
+            if DEBUG_MODE:
+                print(f"    🔍 [CONSENSO] Campo {field_name}: REPEATED → TO_JSON_STRING")
         else:
             # SIEMPRE aplicar cast para asegurar consistencia de tipos
             cast_expression = generate_cast_for_field(field_name, source_type, target_type)
-            print(f"    🔍 [CONSENSO] Campo {field_name}: {source_type} → {target_type} = {cast_expression[:50]}")
+            if DEBUG_MODE:
+                print(f"    🔍 [CONSENSO] Campo {field_name}: {source_type} → {target_type} = {cast_expression[:50]}")
         # Usar el alias si existe, si no usar el nombre original
         alias = company_aliases.get(field_name, field_name)
         silver_fields.append(f"    {cast_expression} as {alias}")
@@ -564,7 +574,7 @@ def get_default_value_for_type_with_cast(data_type):
     }
     return defaults.get(data_type, 'NULL')
 
-def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_table=None, use_bronze=False, specific_company_id=None):
+def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_table=None, use_bronze=False, specific_company_id=None, debug=False):
     """
     Genera vistas Silver para todas las tablas o una específica
     
@@ -574,10 +584,14 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
         specific_table (str): Si se proporciona, genera solo esta tabla
         use_bronze (bool): Si True, usa tablas manuales de bronze en lugar de Fivetran
         specific_company_id (int): Si se proporciona, procesa solo esta compañía
+        debug (bool): Si True, muestra mensajes de debug detallados
     
     Returns:
         tuple: (all_results, output_dir)
     """
+    # Guardar flag de debug globalmente para acceso en otras funciones
+    global DEBUG_MODE
+    DEBUG_MODE = debug
     # Determinar modo de operación
     mode_text = "FORZADO" if force_mode else "NORMAL"
     source_text = "BRONZE (tablas manuales)" if use_bronze else "ORIGINAL (tablas ServiceTitan)"
@@ -739,11 +753,12 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
                         time.sleep(2)
                     
                     print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
-                    print(f"\n{'='*80}")
-                    print(f"SQL GENERADO:")
-                    print(f"{'='*80}")
-                    print(sql_content)
-                    print(f"{'='*80}\n")
+                    if DEBUG_MODE:
+                        print(f"\n{'='*80}")
+                        print(f"SQL GENERADO:")
+                        print(f"{'='*80}")
+                        print(sql_content)
+                        print(f"{'='*80}\n")
                     query_job = client.query(sql_content)
                     query_job.result()  # Esperar a que termine
                     print(f"    ✅ Vista creada: {company_name}")
@@ -846,6 +861,8 @@ if __name__ == "__main__":
     parser.add_argument('--yes', '-y', action='store_true', help='Responder "sí" a todas las confirmaciones')
     parser.add_argument('--bronze', '-b', action='store_true',
         help='Usar tablas manuales de bronze en lugar de las originales. Se puede combinar con --force, --table, --company-id y --start-letter')
+    parser.add_argument('--debug', '-d', action='store_true',
+        help='Activar modo debug: muestra mensajes detallados de procesamiento y SQL generado')
     
     args = parser.parse_args()
     
@@ -863,7 +880,8 @@ if __name__ == "__main__":
         start_from_letter=args.start_letter,
         specific_table=args.table,
         use_bronze=args.bronze,
-        specific_company_id=args.company_id
+        specific_company_id=args.company_id,
+        debug=args.debug
     )
     
     print(f"\n✅ Proceso completado exitosamente!")
