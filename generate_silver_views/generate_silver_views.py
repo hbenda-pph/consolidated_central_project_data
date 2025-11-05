@@ -123,12 +123,12 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
             row_dict = row.to_dict()  # Convertir la fila a diccionario
             data_type = row_dict['data_type']
             
-            # Si es ARRAY<STRUCT<...>> (REPEATED RECORD), convertir a STRING
+            # Si es ARRAY<STRUCT<...>> (REPEATED RECORD), NO aplanar pero marcar
             if data_type.startswith('ARRAY<STRUCT<'):
-                print(f"  ⚠️ Campo REPEATED RECORD detectado: {row_dict['column_name']} - Convirtiendo a JSON STRING")
-                row_dict['data_type'] = 'STRING'  # Lo trataremos como STRING (JSON)
+                print(f"  ⚠️ Campo REPEATED RECORD detectado: {row_dict['column_name']} - Se convertirá a JSON STRING en la vista")
+                # NO cambiar el data_type aquí, mantener el original para el análisis
                 row_dict['alias_name'] = row_dict['column_name']
-                row_dict['is_repeated_record'] = True  # Marcar para conversión especial
+                row_dict['is_repeated_record'] = True  # Marcar para conversión especial en SQL
                 flattened_fields.append(row_dict)
             # Si es STRUCT simple (no array), agregar los campos aplanados
             elif data_type.startswith('STRUCT<'):
