@@ -305,14 +305,7 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
         # Si es un REPEATED RECORD, marcarlo
         if row.get('is_repeated_record', False):
             company_repeated_records[field_name] = True
-            print(f"  🔍 DEBUG: Campo REPEATED RECORD marcado: {field_name}")
     company_field_names = set(company_fields.keys())
-    
-    # DEBUG: Mostrar qué campos están marcados como REPEATED RECORD
-    if company_repeated_records:
-        print(f"  📋 Campos REPEATED RECORD en esta compañía: {list(company_repeated_records.keys())}")
-    else:
-        print(f"  ℹ️  No hay campos REPEATED RECORD en esta compañía")
     
     # Determinar dataset y nombre de tabla fuente
     if use_bronze:
@@ -736,7 +729,6 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
                         time.sleep(2)
                     
                     print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
-                    print(f"\nSQL generado:\n{sql_content}\n")
                     query_job = client.query(sql_content)
                     query_job.result()  # Esperar a que termine
                     print(f"    ✅ Vista creada: {company_name}")
