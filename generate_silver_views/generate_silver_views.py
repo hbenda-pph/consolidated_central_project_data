@@ -158,11 +158,13 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
                         'alias_name': f"{row_dict['column_name']}_{name}",  # Nombre aplanado para el alias
                         'data_type': type_info,
                         'is_nullable': row_dict['is_nullable'],
-                        'ordinal_position': row_dict['ordinal_position']
+                        'ordinal_position': row_dict['ordinal_position'],
+                        'is_repeated_record': False  # Campos aplanados NO son repeated
                     })
             else:
                 # Campos normales: asegurarnos que tengan el mismo nombre como alias
                 row_dict['alias_name'] = row_dict['column_name']  # El alias es el mismo nombre
+                row_dict['is_repeated_record'] = False  # Campos normales NO son repeated
                 flattened_fields.append(row_dict)
         
         # Actualizar el DataFrame con TODOS los campos
