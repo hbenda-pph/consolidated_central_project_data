@@ -309,6 +309,8 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
             company_repeated_records[field_name] = True
     company_field_names = set(company_fields.keys())
     
+    print(f"  🔍 DEBUG company_repeated_records: {company_repeated_records}")
+    
     # Determinar dataset y nombre de tabla fuente
     if use_bronze:
         source_dataset = "bronze"
