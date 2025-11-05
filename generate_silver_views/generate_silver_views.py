@@ -128,6 +128,8 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
         repeated_results = repeated_job.result()
         repeated_fields = set([row.column_name for row in repeated_results])
         
+        print(f"  🔍 Campos REPEATED encontrados en INFORMATION_SCHEMA: {repeated_fields if repeated_fields else 'Ninguno'}")
+        
         # Agregar columna is_repeated al DataFrame
         fields_df['is_repeated'] = fields_df['column_name'].apply(lambda x: x in repeated_fields)
         
@@ -140,7 +142,7 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
             
             # Si es REPEATED (ARRAY de cualquier cosa), convertir a JSON STRING
             if is_repeated:
-                print(f"  ⚠️ Campo REPEATED detectado: {row_dict['column_name']} ({data_type}) - Se convertirá a JSON STRING en la vista")
+                print(f"  ⚠️ Campo REPEATED detectado: {row_dict['column_name']} (tipo: {data_type}) - Se convertirá a JSON STRING en la vista")
                 # NO cambiar el data_type aquí, mantener el original para el análisis
                 row_dict['alias_name'] = row_dict['column_name']
                 row_dict['is_repeated_record'] = True  # Marcar para conversión especial en SQL
