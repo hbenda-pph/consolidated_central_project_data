@@ -98,15 +98,12 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
         source_table = table_name
         
     try:
+        # Primero obtener los campos básicos
         query = f"""
             SELECT
-                table_catalog,
-                table_schema,
-                table_name,
                 column_name,
                 data_type,
                 is_nullable,
-                column_default,
                 ordinal_position
             FROM `{project_id}.{dataset_name}.INFORMATION_SCHEMA.COLUMNS`
             WHERE table_name = '{source_table}'
@@ -117,20 +114,38 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
         results = query_job.result()
         fields_df = pd.DataFrame([dict(row) for row in results])
         
-        # Aplanar campos STRUCT (pero NO ARRAY<STRUCT> que son REPEATED)
+        # Ahora obtener información de campos REPEATED desde COLUMN_FIELD_PATHS
+        repeated_query = f"""
+            SELECT DISTINCT
+                field_path as column_name
+            FROM `{project_id}.{dataset_name}.INFORMATION_SCHEMA.COLUMN_FIELD_PATHS`
+            WHERE table_name = '{source_table}'
+              AND data_type LIKE 'ARRAY%'
+              AND field_path NOT LIKE '%.%'  -- Solo campos de nivel superior
+        """
+        
+        repeated_job = client.query(repeated_query)
+        repeated_results = repeated_job.result()
+        repeated_fields = set([row.column_name for row in repeated_results])
+        
+        # Agregar columna is_repeated al DataFrame
+        fields_df['is_repeated'] = fields_df['column_name'].apply(lambda x: x in repeated_fields)
+        
+        # Aplanar campos STRUCT (pero NO si son REPEATED)
         flattened_fields = []
         for _, row in fields_df.iterrows():
             row_dict = row.to_dict()  # Convertir la fila a diccionario
             data_type = row_dict['data_type']
+            is_repeated = row_dict.get('is_repeated', False)
             
-            # Si es ARRAY<STRUCT<...>> (REPEATED RECORD), NO aplanar pero marcar
-            if data_type.startswith('ARRAY<STRUCT<'):
-                print(f"  ⚠️ Campo REPEATED RECORD detectado: {row_dict['column_name']} - Se convertirá a JSON STRING en la vista")
+            # Si es REPEATED (ARRAY de cualquier cosa), convertir a JSON STRING
+            if is_repeated:
+                print(f"  ⚠️ Campo REPEATED detectado: {row_dict['column_name']} ({data_type}) - Se convertirá a JSON STRING en la vista")
                 # NO cambiar el data_type aquí, mantener el original para el análisis
                 row_dict['alias_name'] = row_dict['column_name']
                 row_dict['is_repeated_record'] = True  # Marcar para conversión especial en SQL
                 flattened_fields.append(row_dict)
-            # Si es STRUCT simple (no array), agregar los campos aplanados
+            # Si es STRUCT simple (no repeated), agregar los campos aplanados
             elif data_type.startswith('STRUCT<'):
                 # Extraer los subcampos del STRUCT
                 struct_fields = data_type.replace('STRUCT<', '').replace('>', '').split(', ')
