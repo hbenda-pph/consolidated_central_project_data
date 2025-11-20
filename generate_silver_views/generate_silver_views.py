@@ -380,8 +380,13 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
             if DEBUG_MODE:
                 print(f"    🔍 [CONSENSO] Campo {field_name}: REPEATED → TO_JSON_STRING")
         else:
-            # SIEMPRE aplicar cast para asegurar consistencia de tipos
-            cast_expression = generate_cast_for_field(field_name, source_type, target_type)
+            ## SIEMPRE aplicar cast para asegurar consistencia de tipos
+            #cast_expression = generate_cast_for_field(field_name, source_type, target_type)
+            # Solo aplicar cast si los tipos son diferentes
+            if source_type == target_type:
+                cast_expression = field_name
+            else:
+                cast_expression = generate_cast_for_field(field_name, source_type, target_type)
             if DEBUG_MODE:
                 print(f"    🔍 [CONSENSO] Campo {field_name}: {source_type} → {target_type} = {cast_expression[:50]}")
         # Usar el alias si existe, si no usar el nombre original
