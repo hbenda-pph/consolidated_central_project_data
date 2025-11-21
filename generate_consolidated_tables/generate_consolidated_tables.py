@@ -256,30 +256,14 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
     cluster_sql = f"CLUSTER BY {', '.join(cluster_fields)}" if cluster_fields else ""
     
     # SQL completo - SIEMPRE con particionamiento por MES
-    if table_name == 'campaign':
-        # Para campaign, extraer category.id en una subconsulta
-        create_sql = f"""
-        CREATE OR REPLACE TABLE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
-        PARTITION BY DATE_TRUNC({partition_field}, MONTH)
-        {cluster_sql}
-        AS
-        WITH source_data AS (
-            {' UNION ALL '.join(union_parts)}
-        )
-        SELECT 
-            *,
-            category.id as category_id  -- Extraer id del RECORD para clustering
-        FROM source_data
-        """
-    else:
-        # Para todas las demás tablas, SQL normal
-        create_sql = f"""
-        CREATE OR REPLACE TABLE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
-        PARTITION BY DATE_TRUNC({partition_field}, MONTH)
-        {cluster_sql}
-        AS
-        {' UNION ALL '.join(union_parts)}
-        """
+    # Lógica genérica para todas las tablas (las vistas Silver ya tienen campos aplanados)
+    create_sql = f"""
+    CREATE OR REPLACE TABLE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
+    PARTITION BY DATE_TRUNC({partition_field}, MONTH)
+    {cluster_sql}
+    AS
+    {' UNION ALL '.join(union_parts)}
+    """
     
     print(f"  🔄 Creando tabla: consolidated_{table_name}")
     print(f"     📊 Compañías: {len(companies_df)}")
@@ -340,30 +324,9 @@ def create_or_update_scheduled_query(table_name, companies_df, partition_field, 
         FROM `{company['company_project_id']}.{DATASET_SILVER}.vw_{table_name}`"""
         union_parts.append(union_part)
     
-    if table_name == 'campaign':
-        # Para campaign, extraer category.id en una subconsulta
-        refresh_sql = f"""
-/*
- * Refresh completo para {table_name}
- * Recrea la tabla completa desde las vistas Silver
- * Mantiene particionamiento y clusterizado originales
- * Generado automáticamente
- */
-CREATE OR REPLACE TABLE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
-PARTITION BY DATE_TRUNC({partition_field}, MONTH)
-CLUSTER BY ({', '.join(cluster_fields)})
-AS
-WITH source_data AS (
-    {' UNION ALL '.join(union_parts)}
-)
-SELECT 
-    *,
-    category.id as category_id  -- Extraer id del RECORD para clustering
-FROM source_data;
-"""
-    else:
-        # Para todas las demás tablas, SQL normal
-        refresh_sql = f"""
+    
+    # Lógica genérica para todas las tablas (las vistas Silver ya tienen campos aplanados)
+    refresh_sql = f"""
 /*
  * Refresh completo para {table_name}
  * Recrea la tabla completa desde las vistas Silver
@@ -594,4 +557,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ ERROR CRÍTICO: {str(e)}")
         sys.exit(1)
-
