@@ -269,6 +269,11 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
     print(f"     📊 Compañías: {len(companies_df)}")
     print(f"     ⚙️  Particionado: {partition_field} (por MES)")
     print(f"     🔗 Clusterizado: {cluster_fields}")
+    # Mostrar SQL generado para revisión
+    print(f"\n  📝 SQL GENERADO:")
+    print(f"  {'='*80}")
+    print(create_sql)
+    print(f"  {'='*80}\n")
     
     try:
         query_job = client.query(create_sql)
