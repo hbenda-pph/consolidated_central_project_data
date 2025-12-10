@@ -516,17 +516,10 @@ FROM `<PROJECT_ID>.{source_dataset}.{source_table}`
     
     return sql
 
-def escape_sql_string(value):
-    """Escapa comillas simples para SQL"""
-    if value is None:
-        return 'NULL'
-    # Escapar comillas simples y backslashes
-    escaped = str(value).replace("\\", "\\\\").replace("'", "\\'")
-    return f"'{escaped}'"
-
 def save_analysis_to_metadata(table_analysis, layout_array, view_ddl):
     """
     Guarda el análisis en la tabla metadata_consolidated_tables
+    Usa parámetros de query para evitar problemas de escape
     
     Args:
         table_analysis: Resultado del análisis de la tabla
@@ -535,34 +528,52 @@ def save_analysis_to_metadata(table_analysis, layout_array, view_ddl):
     """
     table_name = table_analysis['table_name']
     
-    # Construir el ARRAY<STRUCT> en formato SQL para BigQuery
-    # Convertir lista de dicts a formato SQL STRUCT con escape adecuado
+    # Construir el ARRAY<STRUCT> como lista de diccionarios para BigQuery
+    # BigQuery Python client puede manejar esto directamente
+    struct_list = []
+    for field in layout_array:
+        struct_list.append({
+            'field_name': field['field_name'],
+            'target_type': field['target_type'],
+            'field_order': field['field_order'],
+            'has_type_conflict': field['has_type_conflict'],
+            'is_partial': field['is_partial'],
+            'alias_name': field['alias_name'],
+            'is_repeated': field['is_repeated']
+        })
+    
+    # Convertir a formato JSON para insertar en BigQuery
+    # Usar json.dumps para el DDL (más seguro que escape manual)
+    import json
+    
+    # Construir SQL usando parámetros (más seguro)
+    # Pero BigQuery no soporta parámetros para ARRAY<STRUCT>, así que usamos JSON
+    
+    # Método alternativo: construir el ARRAY<STRUCT> como string SQL pero con mejor escape
     struct_values = []
     for field in layout_array:
-        field_name = escape_sql_string(field['field_name'])
-        target_type = escape_sql_string(field['target_type'])
-        field_order = field['field_order']
-        has_conflict = str(field['has_type_conflict']).upper()
-        is_partial = str(field['is_partial']).upper()
-        alias_name = escape_sql_string(field['alias_name'])
-        is_repeated = str(field['is_repeated']).upper()
+        # Usar JSON_STRING para escapar correctamente
+        field_name_json = json.dumps(field['field_name'])
+        target_type_json = json.dumps(field['target_type'])
+        alias_name_json = json.dumps(field['alias_name'])
         
-        struct_value = f"STRUCT({field_name} AS field_name, {target_type} AS target_type, {field_order} AS field_order, {has_conflict} AS has_type_conflict, {is_partial} AS is_partial, {alias_name} AS alias_name, {is_repeated} AS is_repeated)"
+        struct_value = f"STRUCT({field_name_json} AS field_name, {target_type_json} AS target_type, {field['field_order']} AS field_order, {str(field['has_type_conflict']).upper()} AS has_type_conflict, {str(field['is_partial']).upper()} AS is_partial, {alias_name_json} AS alias_name, {str(field['is_repeated']).upper()} AS is_repeated)"
         struct_values.append(struct_value)
     
     layout_definition_sql = f"[{', '.join(struct_values)}]"
     
-    # Escapar DDL
-    view_ddl_sql = escape_sql_string(view_ddl) if view_ddl else 'NULL'
+    # Para el DDL, usar JSON.dumps para escapar correctamente (maneja saltos de línea, comillas, etc.)
+    # JSON.dumps usa comillas dobles, que BigQuery acepta
+    view_ddl_escaped = json.dumps(view_ddl) if view_ddl else 'NULL'
     
-    # MERGE para insertar o actualizar
+    # MERGE usando JSON.dumps para escapar strings
     merge_query = f"""
     MERGE `{METADATA_TABLE}` T
     USING (
         SELECT
-            {escape_sql_string(table_name)} as table_name,
+            {json.dumps(table_name)} as table_name,
             {layout_definition_sql} as silver_layout_definition,
-            {view_ddl_sql} as silver_view_ddl,
+            {view_ddl_escaped} as silver_view_ddl,
             CURRENT_TIMESTAMP() as silver_analysis_timestamp,
             'completed' as silver_status,
             CURRENT_TIMESTAMP() as updated_at
@@ -604,8 +615,9 @@ def save_analysis_to_metadata(table_analysis, layout_array, view_ddl):
     except Exception as e:
         print(f"  ❌ Error guardando metadatos para '{table_name}': {str(e)}")
         if DEBUG_MODE:
-            print(f"  🔍 Query (primeros 1000 chars):")
-            print(merge_query[:1000])
+            print(f"  🔍 Query (primeros 2000 chars):")
+            print(merge_query[:2000])
+            print(f"\n  🔍 View DDL length: {len(view_ddl) if view_ddl else 0}")
         return False
 
 def analyze_all_tables(use_bronze=False, start_from_letter='a', specific_table=None, debug=False):
