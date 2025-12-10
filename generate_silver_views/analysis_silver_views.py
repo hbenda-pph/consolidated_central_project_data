@@ -497,20 +497,24 @@ def generate_sample_view_ddl(table_analysis, use_bronze=False):
             default_value = get_default_value_for_type_with_cast(target_type)
             silver_fields.append(f"    {default_value} as {field_name}")
     
-    # Crear SQL
+    # Crear SQL usando el project_id real de la compañía ejemplo
+    # Este DDL servirá como referencia/template, pero el script de generación
+    # usará layout_definition para generar el DDL correcto para cada compañía
     view_name = f"vw_{table_name}"
     fields_content = ',\n'.join(silver_fields)
     source_comment = "tabla manual en bronze" if use_bronze else "tabla Fivetran"
     
+    # Usar project_id real en lugar de placeholder
     sql = f"""-- Vista Silver para {sample_company['company_name']} - Tabla {table_name}
 -- Generada automáticamente el {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 -- Fuente: {source_comment}
--- NOTA: Este es un DDL de ejemplo. El script de generación ajustará project_id y dataset según la compañía.
+-- NOTA: Este es un DDL de ejemplo para la compañía {sample_company['company_name']}.
+-- El script de generación usará silver_layout_definition para generar el DDL correcto para cada compañía.
 
-CREATE OR REPLACE VIEW `<PROJECT_ID>.silver.{view_name}` AS (
+CREATE OR REPLACE VIEW `{project_id}.silver.{view_name}` AS (
 SELECT
 {fields_content}
-FROM `<PROJECT_ID>.{source_dataset}.{source_table}`
+FROM `{project_id}.{source_dataset}.{source_table}`
 );
 """
     
