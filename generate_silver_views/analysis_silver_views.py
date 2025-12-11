@@ -172,7 +172,8 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
         fields_df = pd.DataFrame(flattened_fields)
         return fields_df
     except Exception as e:
-        print(f"⚠️  Error al obtener campos de {project_id}.{dataset_name}.{table_name}: {str(e)}")
+        if DEBUG_MODE:
+            print(f"  ⚠️  Error obteniendo campos de {project_id}.{dataset_name}.{table_name}: {str(e)}")
         return pd.DataFrame()
 
 def analyze_table_fields_across_companies(table_name, use_bronze=False, companies_df=None):
@@ -204,9 +205,9 @@ def analyze_table_fields_across_companies(table_name, use_bronze=False, companie
         fields_df = get_table_fields_with_types(project_id, table_name, use_bronze)
         
         if fields_df.empty:
-            source_type = "manual (bronze)" if use_bronze else "original"
+            source_type = "bronze" if use_bronze else "original"
             source_name = get_manual_table_name(table_name) if use_bronze else table_name
-            print(f"  ⚠️  {company_name}: Tabla {source_type} '{source_name}' no encontrada")
+            print(f"  {company_name}: Tabla {source_type} '{source_name}' no existe")
             continue
             
         # Filtrar campos de control del ETL (deben quedarse solo en Bronze)
@@ -227,7 +228,7 @@ def analyze_table_fields_across_companies(table_name, use_bronze=False, companie
         all_table_fields.update(fields_list)
     
     if not table_analysis_results:
-        print(f"  ❌ No se encontraron datos para la tabla '{table_name}'")
+        print(f"  Tabla '{table_name}' no existe en ninguna compañía")
         return None
     
     # Analizar campos comunes y únicos
@@ -789,7 +790,7 @@ def analyze_all_tables(use_bronze=None, start_from_letter='a', specific_table=No
             table_analysis = analyze_table_fields_across_companies(table_name, table_use_bronze, companies_df)
             
             if table_analysis is None:
-                print(f"  ⏭️  Saltando tabla '{table_name}' - no se encontraron datos")
+                print(f"  Saltando tabla '{table_name}' - no existe en ninguna compañía")
                 results_summary['skipped'] += 1
                 continue
             
@@ -802,7 +803,7 @@ def analyze_all_tables(use_bronze=None, start_from_letter='a', specific_table=No
             if view_ddl:
                 print(f"  ✅ DDL de ejemplo generado")
             
-            # Guardar en metadata (pasar table_use_bronze para guardar source_type)
+            # Guardar en metadata
             if save_analysis_to_metadata(table_analysis, layout_array, view_ddl, table_use_bronze):
                 results_summary['success'] += 1
             else:
