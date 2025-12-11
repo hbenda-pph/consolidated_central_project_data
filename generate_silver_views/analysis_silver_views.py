@@ -497,30 +497,43 @@ def generate_sample_view_ddl(table_analysis, use_bronze=False):
             default_value = get_default_value_for_type_with_cast(target_type)
             silver_fields.append(f"    {default_value} as {field_name}")
     
-    # Crear SQL usando el project_id real de la compañía ejemplo
-    # Este DDL servirá como referencia/template, pero el script de generación
-    # usará layout_definition para generar el DDL correcto para cada compañía
+    # Crear SQL template con placeholder PROJECT_ID
+    # Este DDL servirá como template que el script de generación reemplazará
+    # con el project_id real de cada compañía
     view_name = f"vw_{table_name}"
     fields_content = ',\n'.join(silver_fields)
     source_comment = "tabla manual en bronze" if use_bronze else "tabla Fivetran"
     
-    # Usar project_id real en lugar de placeholder
-    sql = f"""-- Vista Silver para {sample_company['company_name']} - Tabla {table_name}
+    # Determinar el formato del dataset para el template
+    # Para tablas Fivetran: servicetitan_{PROJECT_ID} (con guiones convertidos a guiones bajos)
+    # Para tablas bronze: siempre "bronze"
+    if use_bronze:
+        source_dataset_template = "bronze"
+        source_table_template = get_manual_table_name(table_name)
+    else:
+        # El dataset de Fivetran tiene formato: servicetitan_{project_id}
+        # donde project_id tiene guiones convertidos a guiones bajos
+        # Usamos placeholder <PROJECT_ID> y el script de generación hará la conversión
+        source_dataset_template = "servicetitan_<PROJECT_ID>"
+        source_table_template = table_name
+    
+    sql = f"""-- Vista Silver Template - Tabla {table_name}
 -- Generada automáticamente el {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 -- Fuente: {source_comment}
--- NOTA: Este es un DDL de ejemplo para la compañía {sample_company['company_name']}.
--- El script de generación usará silver_layout_definition para generar el DDL correcto para cada compañía.
+-- Template para todas las compañías. El script de generación reemplazará:
+--   <PROJECT_ID> con el project_id real de cada compañía
+--   En dataset Fivetran: también convertirá guiones a guiones bajos (ej: shape-mhs-1 -> shape_mhs_1)
 
-CREATE OR REPLACE VIEW `{project_id}.silver.{view_name}` AS (
+CREATE OR REPLACE VIEW `<PROJECT_ID>.silver.{view_name}` AS (
 SELECT
 {fields_content}
-FROM `{project_id}.{source_dataset}.{source_table}`
+FROM `<PROJECT_ID>.{source_dataset_template}.{source_table_template}`
 );
 """
     
     return sql
 
-def save_analysis_to_metadata(table_analysis, layout_array, view_ddl):
+def save_analysis_to_metadata(table_analysis, layout_array, view_ddl, use_bronze=False):
     """
     Guarda el análisis en la tabla metadata_consolidated_tables
     Usa parámetros de query para evitar problemas de escape
@@ -529,8 +542,10 @@ def save_analysis_to_metadata(table_analysis, layout_array, view_ddl):
         table_analysis: Resultado del análisis de la tabla
         layout_array: Array de STRUCT con la definición del layout
         view_ddl: SQL DDL de ejemplo
+        use_bronze: Si True, la fuente es bronze, si False es fivetran
     """
     table_name = table_analysis['table_name']
+    # silver_use_bronze es BOOL: True = bronze, False = fivetran
     
     # Construir el ARRAY<STRUCT> como lista de diccionarios para BigQuery
     # BigQuery Python client puede manejar esto directamente
@@ -580,6 +595,7 @@ def save_analysis_to_metadata(table_analysis, layout_array, view_ddl):
             {view_ddl_escaped} as silver_view_ddl,
             CURRENT_TIMESTAMP() as silver_analysis_timestamp,
             'completed' as silver_status,
+            {str(use_bronze).upper()} as silver_use_bronze,
             CURRENT_TIMESTAMP() as updated_at
     ) S
     ON T.table_name = S.table_name
@@ -589,6 +605,7 @@ def save_analysis_to_metadata(table_analysis, layout_array, view_ddl):
             silver_view_ddl = S.silver_view_ddl,
             silver_analysis_timestamp = S.silver_analysis_timestamp,
             silver_status = S.silver_status,
+            silver_use_bronze = S.silver_use_bronze,
             updated_at = S.updated_at
     WHEN NOT MATCHED THEN
         INSERT (
@@ -597,6 +614,7 @@ def save_analysis_to_metadata(table_analysis, layout_array, view_ddl):
             silver_view_ddl,
             silver_analysis_timestamp,
             silver_status,
+            silver_use_bronze,
             created_at,
             updated_at
         )
@@ -606,6 +624,7 @@ def save_analysis_to_metadata(table_analysis, layout_array, view_ddl):
             S.silver_view_ddl,
             S.silver_analysis_timestamp,
             S.silver_status,
+            S.silver_use_bronze,
             S.silver_analysis_timestamp,
             S.updated_at
         )
@@ -624,12 +643,40 @@ def save_analysis_to_metadata(table_analysis, layout_array, view_ddl):
             print(f"\n  🔍 View DDL length: {len(view_ddl) if view_ddl else 0}")
         return False
 
-def analyze_all_tables(use_bronze=False, start_from_letter='a', specific_table=None, debug=False):
+def get_table_use_bronze_from_metadata(table_name):
+    """
+    Obtiene si debe usar bronze desde los metadatos
+    
+    Returns:
+        bool: True si debe usar bronze, False si fivetran, None si no está en metadatos
+    """
+    try:
+        query = f"""
+        SELECT silver_use_bronze
+        FROM `{METADATA_TABLE}`
+        WHERE table_name = '{table_name}'
+        LIMIT 1
+        """
+        query_job = client_central.query(query)
+        results = query_job.result()
+        row = next(results, None)
+        if row and row.silver_use_bronze is not None:
+            return bool(row.silver_use_bronze)
+        return None
+    except Exception as e:
+        if DEBUG_MODE:
+            print(f"  ⚠️  Error leyendo silver_use_bronze para {table_name}: {str(e)}")
+        return None
+
+def analyze_all_tables(use_bronze=None, start_from_letter='a', specific_table=None, debug=False):
     """
     Analiza todas las tablas y guarda los resultados en metadata_consolidated_tables
     
     Args:
-        use_bronze: Si True, usa tablas manuales de bronze
+        use_bronze: 
+            - None: Lee desde metadatos (default)
+            - True: Fuerza uso de bronze para todas las tablas
+            - False: Fuerza uso de fivetran para todas las tablas
         start_from_letter: Letra inicial para filtrar tablas
         specific_table: Si se proporciona, analiza solo esta tabla
         debug: Si True, muestra mensajes detallados
@@ -637,9 +684,17 @@ def analyze_all_tables(use_bronze=False, start_from_letter='a', specific_table=N
     global DEBUG_MODE
     DEBUG_MODE = debug
     
+    # Determinar modo de operación
+    if use_bronze is None:
+        mode_text = "AUTOMÁTICO (desde metadatos)"
+    elif use_bronze:
+        mode_text = "FORZADO: BRONZE (tablas manuales)"
+    else:
+        mode_text = "FORZADO: FIVETRAN (tablas ServiceTitan)"
+    
     print("🚀 ANÁLISIS DE LAYOUTS PARA VISTAS SILVER")
     print("=" * 80)
-    print(f"Modo: {'BRONZE (tablas manuales)' if use_bronze else 'ORIGINAL (tablas ServiceTitan)'}")
+    print(f"Modo: {mode_text}")
     print(f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
     
@@ -655,7 +710,9 @@ def analyze_all_tables(use_bronze=False, start_from_letter='a', specific_table=N
     
     # Obtener tablas dinámicamente
     print("\n📋 Obteniendo lista de tablas...")
-    if use_bronze:
+    # Si use_bronze está forzado, usar ese método
+    # Si es None, obtener desde metadatos o usar fivetran como default
+    if use_bronze is True:
         if companies_df.empty:
             print("❌ No hay compañías para obtener tablas")
             return
@@ -675,6 +732,7 @@ def analyze_all_tables(use_bronze=False, start_from_letter='a', specific_table=N
             print(f"❌ Error obteniendo tablas de bronze: {str(e)}")
             return
     else:
+        # Si use_bronze es None o False, obtener desde Fivetran (default)
         from config import get_tables_dynamically
         all_tables_full = get_tables_dynamically()
     
@@ -711,8 +769,24 @@ def analyze_all_tables(use_bronze=False, start_from_letter='a', specific_table=N
         print(f"{'='*80}")
         
         try:
+            # Determinar use_bronze para esta tabla específica
+            table_use_bronze = use_bronze
+            if table_use_bronze is None:
+                # Leer desde metadatos
+                metadata_use_bronze = get_table_use_bronze_from_metadata(table_name)
+                if metadata_use_bronze is not None:
+                    table_use_bronze = metadata_use_bronze
+                else:
+                    # Si no está en metadatos, usar fivetran (False) como default
+                    table_use_bronze = False
+                    if DEBUG_MODE:
+                        print(f"  ℹ️  No hay silver_use_bronze en metadatos para '{table_name}', usando 'fivetran' (False) como default")
+            
+            source_type_text = "BRONZE" if table_use_bronze else "FIVETRAN"
+            print(f"  📊 Fuente: {source_type_text}")
+            
             # Analizar tabla
-            table_analysis = analyze_table_fields_across_companies(table_name, use_bronze, companies_df)
+            table_analysis = analyze_table_fields_across_companies(table_name, table_use_bronze, companies_df)
             
             if table_analysis is None:
                 print(f"  ⏭️  Saltando tabla '{table_name}' - no se encontraron datos")
@@ -724,12 +798,12 @@ def analyze_all_tables(use_bronze=False, start_from_letter='a', specific_table=N
             print(f"  ✅ Layout construido: {len(layout_array)} campos")
             
             # Generar DDL de ejemplo
-            view_ddl = generate_sample_view_ddl(table_analysis, use_bronze)
+            view_ddl = generate_sample_view_ddl(table_analysis, table_use_bronze)
             if view_ddl:
                 print(f"  ✅ DDL de ejemplo generado")
             
-            # Guardar en metadata
-            if save_analysis_to_metadata(table_analysis, layout_array, view_ddl):
+            # Guardar en metadata (pasar table_use_bronze para guardar source_type)
+            if save_analysis_to_metadata(table_analysis, layout_array, view_ddl, table_use_bronze):
                 results_summary['success'] += 1
             else:
                 results_summary['errors'] += 1
@@ -757,7 +831,9 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Analiza layouts para vistas Silver')
     parser.add_argument('--bronze', '-b', action='store_true',
-        help='Usar tablas manuales de bronze')
+        help='Forzar uso de tablas manuales de bronze para todas las tablas')
+    parser.add_argument('--fivetran', '-f', action='store_true',
+        help='Forzar uso de tablas Fivetran para todas las tablas')
     parser.add_argument('--start-letter', '-s', default='a',
         help='Letra inicial para filtrar tablas (default: a)')
     parser.add_argument('--table', '-t',
@@ -767,8 +843,19 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
+    # Determinar use_bronze: None (auto desde metadatos), True (bronze), False (fivetran)
+    if args.bronze and args.fivetran:
+        print("❌ ERROR: No puedes usar --bronze y --fivetran al mismo tiempo")
+        sys.exit(1)
+    
+    use_bronze_param = None  # Default: leer desde metadatos
+    if args.bronze:
+        use_bronze_param = True
+    elif args.fivetran:
+        use_bronze_param = False
+    
     analyze_all_tables(
-        use_bronze=args.bronze,
+        use_bronze=use_bronze_param,
         start_from_letter=args.start_letter,
         specific_table=args.table,
         debug=args.debug
