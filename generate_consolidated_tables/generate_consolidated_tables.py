@@ -150,6 +150,98 @@ def verify_field_exists(table_name, field_name, company_project_id):
     except Exception:
         return False
 
+def validate_silver_view_schemas(table_name, companies_df):
+    """
+    Valida que todas las vistas Silver tengan el mismo esquema (mismos campos en mismo orden)
+    
+    Args:
+        table_name: Nombre de la tabla
+        companies_df: DataFrame con compañías a validar
+        
+    Returns:
+        tuple: (is_valid, reference_schema, error_messages)
+    """
+    if companies_df.empty:
+        return True, [], []
+    
+    # Obtener esquema de la primera compañía como referencia
+    reference_project_id = companies_df.iloc[0]['company_project_id']
+    reference_company_name = companies_df.iloc[0]['company_name']
+    
+    try:
+        ref_query = f"""
+            SELECT 
+                column_name,
+                data_type,
+                ordinal_position
+            FROM `{reference_project_id}.silver.INFORMATION_SCHEMA.COLUMNS`
+            WHERE table_name = 'vw_{table_name}'
+            ORDER BY ordinal_position
+        """
+        
+        ref_result = client.query(ref_query).result()
+        reference_schema = [(row.column_name, row.data_type, row.ordinal_position) for row in ref_result]
+        
+        if not reference_schema:
+            return False, [], [f"Vista de referencia no encontrada: {reference_company_name}"]
+        
+    except Exception as e:
+        return False, [], [f"Error obteniendo esquema de referencia: {str(e)}"]
+    
+    # Comparar con todas las demás compañías
+    error_messages = []
+    
+    for _, company in companies_df.iterrows():
+        project_id = company['company_project_id']
+        company_name = company['company_name']
+        
+        if project_id == reference_project_id:
+            continue  # Saltar la referencia
+        
+        try:
+            comp_query = f"""
+                SELECT 
+                    column_name,
+                    data_type,
+                    ordinal_position
+                FROM `{project_id}.silver.INFORMATION_SCHEMA.COLUMNS`
+                WHERE table_name = 'vw_{table_name}'
+                ORDER BY ordinal_position
+            """
+            
+            comp_result = client.query(comp_query).result()
+            company_schema = [(row.column_name, row.data_type, row.ordinal_position) for row in comp_result]
+            
+            # Comparar esquemas
+            if len(company_schema) != len(reference_schema):
+                error_messages.append(
+                    f"{company_name}: Diferente número de campos "
+                    f"({len(company_schema)} vs {len(reference_schema)})"
+                )
+                continue
+            
+            # Comparar campo por campo (por posición)
+            for i, (ref_field, comp_field) in enumerate(zip(reference_schema, company_schema)):
+                ref_name, ref_type, ref_pos = ref_field
+                comp_name, comp_type, comp_pos = comp_field
+                
+                if ref_name != comp_name:
+                    error_messages.append(
+                        f"{company_name}: Campo en posición {i+1} diferente "
+                        f"('{comp_name}' vs '{ref_name}')"
+                    )
+                elif ref_type != comp_type:
+                    error_messages.append(
+                        f"{company_name}: Campo '{ref_name}' tiene tipo diferente "
+                        f"({comp_type} vs {ref_type})"
+                    )
+        
+        except Exception as e:
+            error_messages.append(f"{company_name}: Error validando esquema - {str(e)}")
+    
+    is_valid = len(error_messages) == 0
+    return is_valid, reference_schema, error_messages
+
 def detect_partition_field(table_name, sample_company_project_id):
     """Detecta un campo de fecha apropiado para particionar"""
     # Lista de campos comunes de fecha (en orden de preferencia)
@@ -241,7 +333,23 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
             print(f"     con un partition_field apropiado (created_on, created_at, etc.)")
             return False, None, []
     
+    # Validar que todas las vistas tienen el mismo esquema
+    print(f"  🔍 Validando esquemas de vistas Silver...")
+    is_valid, reference_schema, schema_errors = validate_silver_view_schemas(table_name, companies_df)
+    
+    if not is_valid:
+        print(f"  ⚠️  ADVERTENCIA: Diferencias en esquemas detectadas:")
+        for error in schema_errors[:5]:  # Mostrar máximo 5 errores
+            print(f"     - {error}")
+        if len(schema_errors) > 5:
+            print(f"     ... y {len(schema_errors) - 5} más")
+        print(f"  💡 Las vistas Silver deben tener el mismo esquema para UNION ALL")
+        print(f"  💡 Ejecuta 'generate_silver_views.py' para regenerar vistas con layouts consistentes")
+        # Continuar de todas formas - puede que funcione si las diferencias son menores
+    
     # Construir UNION ALL con metadata de compañía
+    # NOTA: Usamos SELECT * porque las vistas Silver ya tienen campos en orden consistente
+    # (ordenados por field_order del layout en metadata_consolidated_tables)
     union_parts = []
     for _, company in companies_df.iterrows():
         union_part = f"""

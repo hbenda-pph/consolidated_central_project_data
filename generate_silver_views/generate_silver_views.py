@@ -2,9 +2,12 @@
 """
 Generate Silver Views for All Tables - CLOUD RUN JOB VERSION
 Este script genera automáticamente las vistas Silver para todas las tablas
-basándose en el análisis de campos comunes y únicos entre compañías.
+basándose en los layouts definidos en metadata_consolidated_tables.
 
-VERSIÓN PARA CLOUD RUN JOB:
+VERSIÓN ACTUALIZADA:
+- Usa metadata_consolidated_tables como FUENTE DE VERDAD
+- Lee layouts predefinidos (más eficiente)
+- Mantiene análisis dinámico como fallback opcional
 - Sin prompts interactivos
 - Modo forzado activado por defecto
 - Procesa TODAS las tablas y compañías
@@ -24,25 +27,33 @@ warnings.filterwarnings('ignore')
 from config import *
 from consolidation_tracking_manager import ConsolidationTrackingManager
 
+# Configuración de metadatos
+PROJECT_CENTRAL = "pph-central"
+DATASET_MANAGEMENT = "management"
+METADATA_TABLE = f"{PROJECT_CENTRAL}.{DATASET_MANAGEMENT}.metadata_consolidated_tables"
+
 # Variable global para modo debug
 DEBUG_MODE = False
 
 # Crear cliente BigQuery con reconexión automática
-def create_bigquery_client():
+def create_bigquery_client(project_id=PROJECT_SOURCE):
     """Crea cliente BigQuery con manejo de reconexión"""
     try:
-        return bigquery.Client(project=PROJECT_SOURCE)
+        return bigquery.Client(project=project_id)
     except Exception as e:
         print(f"⚠️  Error creando cliente BigQuery: {str(e)}")
         print("🔄 Reintentando conexión...")
         time.sleep(5)  # Esperar 5 segundos
-        return bigquery.Client(project=PROJECT_SOURCE)
+        return bigquery.Client(project=project_id)
 
 try:
-    client = create_bigquery_client()
-    print(f"✅ Cliente BigQuery creado exitosamente para proyecto: {PROJECT_SOURCE}")
+    client = create_bigquery_client(PROJECT_SOURCE)
+    client_central = create_bigquery_client(PROJECT_CENTRAL)
+    print(f"✅ Clientes BigQuery creados exitosamente")
+    print(f"   - Source: {PROJECT_SOURCE}")
+    print(f"   - Central: {PROJECT_CENTRAL}")
 except Exception as e:
-    print(f"❌ Error al crear cliente BigQuery: {str(e)}")
+    print(f"❌ Error al crear clientes BigQuery: {str(e)}")
     raise
 
 def get_companies_info():
@@ -82,6 +93,103 @@ def get_manual_table_name(table_name):
     diferenciarlas de las tablas originales.
     """
     return f"{table_name}s"
+
+def get_table_metadata_from_metadata_table(table_name):
+    """
+    Obtiene el layout y configuración de una tabla desde metadata_consolidated_tables
+    
+    Args:
+        table_name: Nombre de la tabla
+        
+    Returns:
+        dict: {
+            'layout_definition': lista de diccionarios con campos,
+            'use_bronze': bool,
+            'exists': bool
+        } o None si no existe
+    """
+    try:
+        query = f"""
+        SELECT
+            silver_layout_definition,
+            silver_use_bronze,
+            silver_status
+        FROM `{METADATA_TABLE}`
+        WHERE table_name = '{table_name}'
+        LIMIT 1
+        """
+        
+        query_job = client_central.query(query)
+        results = query_job.result()
+        row = next(results, None)
+        
+        if row is None:
+            if DEBUG_MODE:
+                print(f"  ⚠️  Tabla '{table_name}' no encontrada en metadatos")
+            return None
+        
+        # Verificar que tiene layout definido
+        if row.silver_layout_definition is None or len(row.silver_layout_definition) == 0:
+            if DEBUG_MODE:
+                print(f"  ⚠️  Tabla '{table_name}' no tiene layout definido en metadatos")
+            return None
+        
+        # Convertir ARRAY<STRUCT> a lista de diccionarios
+        layout_list = []
+        for field_struct in row.silver_layout_definition:
+            layout_list.append({
+                'field_name': field_struct.get('field_name'),
+                'target_type': field_struct.get('target_type'),
+                'field_order': field_struct.get('field_order'),
+                'has_type_conflict': field_struct.get('has_type_conflict', False),
+                'is_partial': field_struct.get('is_partial', False),
+                'alias_name': field_struct.get('alias_name'),
+                'is_repeated': field_struct.get('is_repeated', False)
+            })
+        
+        # Ordenar por field_order
+        layout_list.sort(key=lambda x: x['field_order'])
+        
+        use_bronze = bool(row.silver_use_bronze) if row.silver_use_bronze is not None else False
+        
+        return {
+            'layout_definition': layout_list,
+            'use_bronze': use_bronze,
+            'exists': True,
+            'status': row.silver_status
+        }
+        
+    except Exception as e:
+        if DEBUG_MODE:
+            print(f"  ⚠️  Error leyendo metadatos para '{table_name}': {str(e)}")
+        return None
+
+def get_tables_from_metadata():
+    """
+    Obtiene lista de tablas que tienen layouts definidos en metadata_consolidated_tables
+    
+    Returns:
+        list: Lista de nombres de tablas
+    """
+    try:
+        query = f"""
+        SELECT table_name
+        FROM `{METADATA_TABLE}`
+        WHERE silver_layout_definition IS NOT NULL
+          AND ARRAY_LENGTH(silver_layout_definition) > 0
+          AND silver_status = 'completed'
+        ORDER BY table_name
+        """
+        
+        query_job = client_central.query(query)
+        results = query_job.result()
+        tables = [row.table_name for row in results]
+        
+        return tables
+        
+    except Exception as e:
+        print(f"⚠️  Error obteniendo tablas desde metadatos: {str(e)}")
+        return []
 
 def get_table_fields_with_types(project_id, table_name, use_bronze=False):
     """
@@ -286,10 +394,128 @@ def analyze_table_fields_across_companies(table_name, use_bronze=False, companie
         'field_frequency': field_frequency
     }
 
+def generate_silver_view_sql_from_metadata(table_name, company_result, layout_definition, use_bronze=False):
+    """
+    Genera el SQL para crear una vista Silver usando layout de metadata_consolidated_tables
+    
+    Args:
+        table_name: Nombre de la tabla
+        company_result: Información de la compañía (dict con company_name, project_id, fields_df)
+        layout_definition: Lista de diccionarios con definición de campos desde metadatos
+        use_bronze: Si True, usa tabla de bronze en lugar de servicetitan_*
+    
+    Returns:
+        str: SQL para crear la vista o None si hay error
+    """
+    company_name = company_result['company_name']
+    project_id = company_result['project_id']
+    
+    # Obtener campos de esta compañía con sus tipos (si está disponible)
+    company_fields = {}
+    company_aliases = {}
+    company_repeated_records = {}
+    
+    if 'fields_df' in company_result and company_result['fields_df'] is not None:
+        company_fields_df = company_result['fields_df']
+        for _, row in company_fields_df.iterrows():
+            field_name = row['column_name']
+            company_fields[field_name] = row['data_type']
+            if 'alias_name' in row:
+                company_aliases[field_name] = row['alias_name']
+            if row.get('is_repeated_record', False):
+                company_repeated_records[field_name] = True
+    
+    company_field_names = set(company_fields.keys())
+    
+    # Determinar dataset y nombre de tabla fuente
+    if use_bronze:
+        source_dataset = "bronze"
+        source_table = get_manual_table_name(table_name)
+    else:
+        source_dataset = f"servicetitan_{project_id.replace('-', '_')}"
+        source_table = table_name
+    
+    silver_fields = []
+    
+    # Procesar cada campo del layout definido en metadatos
+    for field_info in layout_definition:
+        field_name = field_info['field_name']
+        target_type = field_info['target_type']
+        alias_name = field_info.get('alias_name', field_name)
+        is_repeated = field_info.get('is_repeated', False)
+        
+        # Verificar si el campo existe en esta compañía
+        if field_name in company_field_names:
+            # Campo existe - aplicar transformación según tipo
+            source_type = company_fields.get(field_name)
+            
+            if is_repeated:
+                # Campo REPEATED - convertir a JSON STRING
+                cast_expression = f"TO_JSON_STRING({field_name})"
+                if DEBUG_MODE:
+                    print(f"    🔍 Campo {field_name}: REPEATED → TO_JSON_STRING")
+            else:
+                # Campo normal - aplicar cast si es necesario
+                if source_type == target_type:
+                    cast_expression = field_name
+                else:
+                    cast_expression = generate_cast_for_field(field_name, source_type, target_type)
+                    if DEBUG_MODE:
+                        print(f"    🔍 Campo {field_name}: {source_type} → {target_type}")
+            
+            silver_fields.append(f"    {cast_expression} as {alias_name}")
+        else:
+            # Campo faltante - usar NULL tipado para mantener layout consistente
+            default_value = get_default_value_for_type_with_cast(target_type)
+            silver_fields.append(f"    {default_value} as {field_name}")
+            if DEBUG_MODE:
+                print(f"    ⚠️  Campo {field_name} faltante - usando {default_value}")
+    
+    # Validar que hay campos para procesar
+    if not silver_fields:
+        print(f"  ⚠️  No hay campos para procesar en {company_name} - {table_name}")
+        return None
+    
+    # CRÍTICO: Mantener el orden del layout (field_order) para consistencia en UNION ALL
+    # BigQuery une por POSICIÓN, no por nombre
+    # El layout_definition ya viene ordenado por field_order, mantener ese orden
+    # NO reordenar alfabéticamente - esto rompería la compatibilidad con UNION ALL
+    
+    # Agregar comas entre campos (excepto el último)
+    fields_with_commas = []
+    for i, field in enumerate(silver_fields):
+        if i < len(silver_fields) - 1:
+            fields_with_commas.append(field + ",")
+        else:
+            fields_with_commas.append(field)
+    
+    # Crear el contenido de campos con saltos de línea
+    fields_content = '\n'.join(fields_with_commas)
+    
+    # Agregar comentario específico para tablas manuales
+    source_comment = "tabla manual en bronze" if use_bronze else "tabla Fivetran"
+    
+    sql = f"""-- Vista Silver para {company_name} - Tabla {table_name}
+-- Generada automáticamente el {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+-- Fuente: {source_comment}
+-- Layout desde metadata_consolidated_tables
+
+CREATE OR REPLACE VIEW `{project_id}.silver.vw_{table_name}` AS (
+SELECT
+{fields_content}
+FROM `{project_id}.{source_dataset}.{source_table}`
+);
+"""
+    
+    return sql
+
 def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
     """
     Genera el SQL para crear una vista Silver para una compañía específica
     Incluye normalización de tipos de datos
+    
+    DEPRECATED: Esta función usa análisis dinámico. 
+    Preferir generate_silver_view_sql_from_metadata() que usa layouts de metadatos.
     
     Args:
         table_analysis: Análisis de la tabla
@@ -579,7 +805,7 @@ def get_default_value_for_type_with_cast(data_type):
     }
     return defaults.get(data_type, 'NULL')
 
-def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_table=None, use_bronze=False, specific_company_id=None, debug=False):
+def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_table=None, use_bronze=None, specific_company_id=None, debug=False, use_metadata=True):
     """
     Genera vistas Silver para todas las tablas o una específica
     
@@ -587,9 +813,10 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
         force_mode (bool): Si True, procesa todas sin confirmación
         start_from_letter (str): Letra inicial para filtrar tablas (útil para reiniciar)
         specific_table (str): Si se proporciona, genera solo esta tabla
-        use_bronze (bool): Si True, usa tablas manuales de bronze en lugar de Fivetran
+        use_bronze (bool): Si True, fuerza uso de bronze; si False, fuerza Fivetran; si None, lee desde metadatos
         specific_company_id (int): Si se proporciona, procesa solo esta compañía
         debug (bool): Si True, muestra mensajes de debug detallados
+        use_metadata (bool): Si True, usa metadata_consolidated_tables como fuente de verdad (default: True)
     
     Returns:
         tuple: (all_results, output_dir)
@@ -597,12 +824,13 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
     # Guardar flag de debug globalmente para acceso en otras funciones
     global DEBUG_MODE
     DEBUG_MODE = debug
+    
     # Determinar modo de operación
     mode_text = "FORZADO" if force_mode else "NORMAL"
-    source_text = "BRONZE (tablas manuales)" if use_bronze else "ORIGINAL (tablas ServiceTitan)"
+    metadata_text = "METADATOS (metadata_consolidated_tables)" if use_metadata else "ANÁLISIS DINÁMICO"
     print(f"🚀 GENERACIÓN DE VISTAS SILVER")
     print(f"   Modo: {mode_text}")
-    print(f"   Fuente: {source_text}")
+    print(f"   Fuente de layouts: {metadata_text}")
     print("=" * 80)
     
     # Inicializar gestor de tracking
@@ -622,41 +850,52 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
         if companies_df.empty:
             print(f"❌ ERROR: No se encontró la compañía con company_id={specific_company_id}")
             return {}, {}
-        print(f"🎯 COMPAÑÍA ESPECÍFICA: Procesando solo company_id={specific_company_id} ({companies_df.iloc[0]['company_name']})")
+        print(f"🎯 Compañía específica: company_id={specific_company_id} ({companies_df.iloc[0]['company_name']})")
     else:
         print(f"✅ Compañías encontradas: {len(companies_df)}")
     
-    # Obtener tablas dinámicamente
-    print("📋 Obteniendo lista de tablas dinámicamente desde INFORMATION_SCHEMA...")
-    
-    if use_bronze:
-        # Obtener tablas desde bronze (terminan en 's')
-        query = f"""
-        SELECT table_name 
-        FROM `{companies_df.iloc[0]['company_project_id']}.bronze.INFORMATION_SCHEMA.TABLES`
-        WHERE table_name LIKE '%s'  -- Solo tablas que terminan en 's'
-        ORDER BY table_name
-        """
-        try:
-            query_job = client.query(query)
-            results = query_job.result()
-            # Quitar la 's' final para normalizar los nombres
-            all_tables_full = [row.table_name[:-1] for row in results]
-            print(f"✅ Tablas manuales encontradas en bronze: {len(all_tables_full)}")
-            print(f"   {', '.join(all_tables_full)}")
-        except Exception as e:
-            print(f"❌ Error obteniendo tablas de bronze: {str(e)}")
+    # Obtener tablas según el modo
+    if use_metadata:
+        print("📋 Obteniendo lista de tablas desde metadata_consolidated_tables...")
+        all_tables_full = get_tables_from_metadata()
+        
+        if not all_tables_full:
+            print("⚠️  No se encontraron tablas en metadatos. ¿Deseas usar análisis dinámico?")
+            print("   Ejecuta con --no-metadata para usar análisis dinámico")
             return {}, {}
+        
+        print(f"✅ Tablas encontradas en metadatos: {len(all_tables_full)}")
     else:
-        # Obtener tablas desde el proceso de extracción original
-        from config import get_tables_dynamically
-        all_tables_full = get_tables_dynamically()
-    
-    if not all_tables_full:
-        print("❌ ERROR: No se encontraron tablas")
-        return {}, {}
-    
-    print(f"✅ Tablas encontradas dinámicamente: {len(all_tables_full)}")
+        # Modo análisis dinámico (fallback)
+        print("📋 Obteniendo lista de tablas dinámicamente desde INFORMATION_SCHEMA...")
+        
+        if use_bronze:
+            # Obtener tablas desde bronze (terminan en 's')
+            project_id_for_tables = companies_df.iloc[0]['company_project_id']
+            query = f"""
+            SELECT table_name 
+            FROM `{project_id_for_tables}.bronze.INFORMATION_SCHEMA.TABLES`
+            WHERE table_name LIKE '%s'
+            ORDER BY table_name
+            """
+            try:
+                query_job = client.query(query)
+                results = query_job.result()
+                all_tables_full = [row.table_name[:-1] for row in results]
+                print(f"✅ Tablas manuales encontradas en bronze: {len(all_tables_full)}")
+            except Exception as e:
+                print(f"❌ Error obteniendo tablas de bronze: {str(e)}")
+                return {}, {}
+        else:
+            # Obtener tablas desde el proceso de extracción original
+            from config import get_tables_dynamically
+            all_tables_full = get_tables_dynamically()
+        
+        if not all_tables_full:
+            print("❌ ERROR: No se encontraron tablas")
+            return {}, {}
+        
+        print(f"✅ Tablas encontradas dinámicamente: {len(all_tables_full)}")
     
     # Filtrar tablas según los parámetros
     if specific_table:
@@ -696,105 +935,234 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
         print(f"     ❌ Errores: {completion_status['error_count']}")
         print(f"     ⚠️  No existe: {completion_status['missing_count']}")
         
-        # Analizar campos de la tabla (pasar companies_df filtrado)
-        table_analysis = analyze_table_fields_across_companies(table_name, use_bronze, companies_df)
-        
-        if table_analysis is None:
-            print(f"  ⏭️  Saltando tabla '{table_name}' - no se encontraron datos")
-            # Registrar estado 0 para todas las compañías (tabla no existe)
-            for _, company in companies_df.iterrows():
-                tracking_manager.update_status(
-                    company_id=company['company_id'],
-                    table_name=table_name,
-                    status=0,
-                    notes="Tabla no existe en esta compañía"
-                )
-            continue
-        
-        all_results[table_name] = table_analysis
-        
-        # Obtener compañías que tienen la tabla
-        companies_with_table = {result['company_name'] for result in table_analysis['company_results']}
-        
-        # Registrar estado 0 para compañías que no tienen la tabla
-        for _, company in companies_df.iterrows():
-            company_name = company['company_name']
-            if company_name not in companies_with_table:
-                tracking_manager.update_status(
-                    company_id=company['company_id'],
-                    table_name=table_name,
-                    status=0,
-                    notes="Tabla no existe en esta compañía"
-                )
-        
-        # Generar vistas Silver para cada compañía
-        company_sql_files = []
-        
-        for company_result in table_analysis['company_results']:
-            company_name = company_result['company_name']
-            project_id = company_result['project_id']
+        # Obtener layout desde metadatos o análisis dinámico
+        if use_metadata:
+            # MODO METADATOS: Leer layout desde metadata_consolidated_tables
+            metadata_info = get_table_metadata_from_metadata_table(table_name)
             
-            # Generar y ejecutar SQL directamente
-            sql_content = generate_silver_view_sql(table_analysis, company_result, use_bronze)
-            
-            # Validar que se generó SQL válido
-            if sql_content is None:
-                print(f"    ⚠️  No se pudo generar SQL para {company_name}")
-                tracking_manager.update_status(
-                    company_id=company_result['company_id'],
-                    table_name=table_name,
-                    status=2,
-                    notes="Error generando SQL - sin campos válidos"
-                )
+            if metadata_info is None:
+                print(f"  ⚠️  Tabla '{table_name}' no tiene layout en metadatos")
+                print(f"  💡 Ejecuta 'analysis_silver_views.py' para generar el layout")
+                # Registrar estado 0 para todas las compañías
+                for _, company in companies_df.iterrows():
+                    tracking_manager.update_status(
+                        company_id=company['company_id'],
+                        table_name=table_name,
+                        status=0,
+                        notes="Tabla no tiene layout en metadatos"
+                    )
                 continue
             
-            # Ejecutar vista directamente en BigQuery con reconexión automática
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    if attempt > 0:
-                        print(f"    🔄 Reintento {attempt + 1}/{max_retries} para {company_name}")
-                        # Esperar antes del reintento
-                        time.sleep(2)
-                    
-                    print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
-                    if DEBUG_MODE:
-                        print(f"\n{'='*80}")
-                        print(f"SQL GENERADO:")
-                        print(f"{'='*80}")
-                        print(sql_content)
-                        print(f"{'='*80}\n")
-                    query_job = client.query(sql_content)
-                    query_job.result()  # Esperar a que termine
-                    print(f"    ✅ Vista creada: {company_name}")
-                    company_sql_files.append(f"SUCCESS: {company_name}")
-                    
-                    # Actualizar tracking
+            layout_definition = metadata_info['layout_definition']
+            table_use_bronze = metadata_info['use_bronze']
+            
+            # Si use_bronze fue especificado explícitamente, usarlo; si no, usar el de metadatos
+            if use_bronze is not None:
+                table_use_bronze = use_bronze
+            
+            print(f"  📋 Layout obtenido desde metadatos: {len(layout_definition)} campos")
+            print(f"  📦 Fuente: {'BRONZE' if table_use_bronze else 'FIVETRAN'}")
+            
+            # Obtener campos de cada compañía para aplicar casts correctos
+            company_results = []
+            for _, company in companies_df.iterrows():
+                project_id = company['company_project_id']
+                if project_id is None:
+                    continue
+                
+                # Obtener campos de la tabla en esta compañía
+                fields_df = get_table_fields_with_types(project_id, table_name, table_use_bronze)
+                
+                if not fields_df.empty:
+                    # Filtrar campos de control del ETL
+                    filtered_fields_df = fields_df[~fields_df['column_name'].str.startswith('_')]
+                    company_results.append({
+                        'company_id': company['company_id'],
+                        'company_name': company['company_name'],
+                        'project_id': project_id,
+                        'fields_df': filtered_fields_df
+                    })
+            
+            if not company_results:
+                print(f"  ⏭️  Saltando tabla '{table_name}' - no se encontraron datos en ninguna compañía")
+                for _, company in companies_df.iterrows():
+                    tracking_manager.update_status(
+                        company_id=company['company_id'],
+                        table_name=table_name,
+                        status=0,
+                        notes="Tabla no existe en esta compañía"
+                    )
+                continue
+            
+            company_sql_files = []
+            
+            # Procesar cada compañía usando el layout de metadatos
+            for company_result in company_results:
+                company_name = company_result['company_name']
+                project_id = company_result['project_id']
+                
+                # Generar SQL usando layout de metadatos
+                sql_content = generate_silver_view_sql_from_metadata(
+                    table_name, 
+                    company_result, 
+                    layout_definition, 
+                    table_use_bronze
+                )
+                
+                # Validar que se generó SQL válido
+                if sql_content is None:
+                    print(f"    ⚠️  No se pudo generar SQL para {company_name}")
                     tracking_manager.update_status(
                         company_id=company_result['company_id'],
                         table_name=table_name,
-                        status=1,
-                        notes=f"Vista creada exitosamente en {project_id}.silver"
+                        status=2,
+                        notes="Error generando SQL - sin campos válidos"
                     )
-                    break  # Éxito, salir del loop de reintentos
-        
-                except Exception as e:
-                    error_msg = str(e)
-                    if attempt == max_retries - 1:  # Último intento
-                        print(f"    ❌ Error final creando vista {company_name}: {error_msg}")
-                        company_sql_files.append(f"ERROR: {company_name}")
+                    continue
+                
+                # Ejecutar vista directamente en BigQuery con reconexión automática
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        if attempt > 0:
+                            print(f"    🔄 Reintento {attempt + 1}/{max_retries} para {company_name}")
+                            time.sleep(2)
                         
-                        # Actualizar tracking con error
+                        print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
+                        if DEBUG_MODE:
+                            print(f"\n{'='*80}")
+                            print(f"SQL GENERADO:")
+                            print(f"{'='*80}")
+                            print(sql_content)
+                            print(f"{'='*80}\n")
+                        query_job = client.query(sql_content)
+                        query_job.result()
+                        print(f"    ✅ Vista creada: {company_name}")
+                        company_sql_files.append(f"SUCCESS: {company_name}")
+                        
                         tracking_manager.update_status(
                             company_id=company_result['company_id'],
                             table_name=table_name,
-                            status=2,
-                            error_message=error_msg,
-                            notes=f"Error al crear vista en {project_id}.silver"
+                            status=1,
+                            notes=f"Vista creada exitosamente en {project_id}.silver (desde metadatos)"
                         )
-                    else:
-                        print(f"    ⚠️  Error en intento {attempt + 1}: {error_msg}")
-                        continue
+                        break
+                    
+                    except Exception as e:
+                        error_msg = str(e)
+                        if attempt == max_retries - 1:
+                            print(f"    ❌ Error final creando vista {company_name}: {error_msg}")
+                            company_sql_files.append(f"ERROR: {company_name}")
+                            
+                            tracking_manager.update_status(
+                                company_id=company_result['company_id'],
+                                table_name=table_name,
+                                status=2,
+                                error_message=error_msg,
+                                notes=f"Error al crear vista en {project_id}.silver"
+                            )
+                        else:
+                            print(f"    ⚠️  Error en intento {attempt + 1}: {error_msg}")
+                            continue
+            
+            # Guardar resumen para esta tabla
+            all_results[table_name] = {
+                'table_name': table_name,
+                'total_companies': len(company_results),
+                'layout_source': 'metadata_consolidated_tables',
+                'field_count': len(layout_definition)
+            }
+        
+        else:
+            # MODO ANÁLISIS DINÁMICO (fallback)
+            table_analysis = analyze_table_fields_across_companies(table_name, use_bronze, companies_df)
+            
+            if table_analysis is None:
+                print(f"  ⏭️  Saltando tabla '{table_name}' - no se encontraron datos")
+                for _, company in companies_df.iterrows():
+                    tracking_manager.update_status(
+                        company_id=company['company_id'],
+                        table_name=table_name,
+                        status=0,
+                        notes="Tabla no existe en esta compañía"
+                    )
+                continue
+            
+            all_results[table_name] = table_analysis
+            
+            companies_with_table = {result['company_name'] for result in table_analysis['company_results']}
+            
+            for _, company in companies_df.iterrows():
+                company_name = company['company_name']
+                if company_name not in companies_with_table:
+                    tracking_manager.update_status(
+                        company_id=company['company_id'],
+                        table_name=table_name,
+                        status=0,
+                        notes="Tabla no existe en esta compañía"
+                    )
+            
+            company_sql_files = []
+            
+            for company_result in table_analysis['company_results']:
+                company_name = company_result['company_name']
+                project_id = company_result['project_id']
+                
+                sql_content = generate_silver_view_sql(table_analysis, company_result, use_bronze)
+                
+                if sql_content is None:
+                    print(f"    ⚠️  No se pudo generar SQL para {company_name}")
+                    tracking_manager.update_status(
+                        company_id=company_result['company_id'],
+                        table_name=table_name,
+                        status=2,
+                        notes="Error generando SQL - sin campos válidos"
+                    )
+                    continue
+                
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        if attempt > 0:
+                            print(f"    🔄 Reintento {attempt + 1}/{max_retries} para {company_name}")
+                            time.sleep(2)
+                        
+                        print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
+                        if DEBUG_MODE:
+                            print(f"\n{'='*80}")
+                            print(f"SQL GENERADO:")
+                            print(f"{'='*80}")
+                            print(sql_content)
+                            print(f"{'='*80}\n")
+                        query_job = client.query(sql_content)
+                        query_job.result()
+                        print(f"    ✅ Vista creada: {company_name}")
+                        company_sql_files.append(f"SUCCESS: {company_name}")
+                        
+                        tracking_manager.update_status(
+                            company_id=company_result['company_id'],
+                            table_name=table_name,
+                            status=1,
+                            notes=f"Vista creada exitosamente en {project_id}.silver"
+                        )
+                        break
+                    
+                    except Exception as e:
+                        error_msg = str(e)
+                        if attempt == max_retries - 1:
+                            print(f"    ❌ Error final creando vista {company_name}: {error_msg}")
+                            company_sql_files.append(f"ERROR: {company_name}")
+                            
+                            tracking_manager.update_status(
+                                company_id=company_result['company_id'],
+                                table_name=table_name,
+                                status=2,
+                                error_message=error_msg,
+                                notes=f"Error al crear vista en {project_id}.silver"
+                            )
+                        else:
+                            print(f"    ⚠️  Error en intento {attempt + 1}: {error_msg}")
+                            continue
         
         # Crear archivo consolidado para la tabla
         consolidated_filename = f"{output_dir}/consolidated_{table_name}_analysis.sql"
@@ -802,19 +1170,17 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
             f.write(f"-- Análisis consolidado para tabla: {table_name}\n")
             f.write(f"-- Generado: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             
-            f.write(f"-- Resumen:\n")
-            f.write(f"-- Total compañías: {table_analysis['total_companies']}\n")
-            f.write(f"-- Campos comunes: {len(table_analysis['common_fields'])}\n")
-            f.write(f"-- Campos parciales: {len(table_analysis['partial_fields'])}\n\n")
-            
-            f.write(f"-- Campos comunes:\n")
-            for field in table_analysis['common_fields']:
-                f.write(f"--   - {field}\n")
-            
-            f.write(f"\n-- Campos parciales:\n")
-            for field in table_analysis['partial_fields']:
-                count = table_analysis['field_frequency'][field]
-                f.write(f"--   - {field}: {count}/{table_analysis['total_companies']} compañías\n")
+            if use_metadata and table_name in all_results:
+                result = all_results[table_name]
+                f.write(f"-- Fuente: metadata_consolidated_tables\n")
+                f.write(f"-- Total compañías: {result['total_companies']}\n")
+                f.write(f"-- Total campos: {result['field_count']}\n\n")
+            elif not use_metadata and table_name in all_results:
+                table_analysis = all_results[table_name]
+                f.write(f"-- Fuente: Análisis dinámico\n")
+                f.write(f"-- Total compañías: {table_analysis['total_companies']}\n")
+                f.write(f"-- Campos comunes: {len(table_analysis['common_fields'])}\n")
+                f.write(f"-- Campos parciales: {len(table_analysis['partial_fields'])}\n\n")
             
             f.write(f"\n-- Archivos SQL generados:\n")
             for sql_file in company_sql_files:
@@ -825,17 +1191,23 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
     # Generar resumen final
     summary_filename = f"{output_dir}/GENERATION_SUMMARY.md"
     with open(summary_filename, 'w', encoding='utf-8') as f:
-        f.write(f"# Resumen de Generación de Vistas Silver - CLOUD RUN JOB\n\n")
-        f.write(f"**Fecha de generación:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        f.write(f"# Resumen de Generación de Vistas Silver\n\n")
+        f.write(f"**Fecha de generación:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"**Fuente de layouts:** {'metadata_consolidated_tables' if use_metadata else 'Análisis dinámico'}\n\n")
         
         f.write(f"## Tablas Procesadas\n\n")
         f.write(f"Total de tablas procesadas: {len(all_results)}\n\n")
         
-        for table_name, analysis in all_results.items():
+        for table_name, result in all_results.items():
             f.write(f"### {table_name}\n")
-            f.write(f"- Compañías con la tabla: {analysis['total_companies']}\n")
-            f.write(f"- Campos comunes: {len(analysis['common_fields'])}\n")
-            f.write(f"- Campos parciales: {len(analysis['partial_fields'])}\n\n")
+            if use_metadata:
+                f.write(f"- Compañías procesadas: {result['total_companies']}\n")
+                f.write(f"- Total campos: {result['field_count']}\n")
+                f.write(f"- Fuente: metadata_consolidated_tables\n\n")
+            else:
+                f.write(f"- Compañías con la tabla: {result['total_companies']}\n")
+                f.write(f"- Campos comunes: {len(result.get('common_fields', []))}\n")
+                f.write(f"- Campos parciales: {len(result.get('partial_fields', []))}\n\n")
     
     # Mostrar resumen final
     print(f"\n📊 RESUMEN FINAL:")
@@ -865,11 +1237,22 @@ if __name__ == "__main__":
     parser.add_argument('--company-id', '-c', type=int, help='Procesar solo una compañía específica (por company_id)')
     parser.add_argument('--yes', '-y', action='store_true', help='Responder "sí" a todas las confirmaciones')
     parser.add_argument('--bronze', '-b', action='store_true',
-        help='Usar tablas manuales de bronze en lugar de las originales. Se puede combinar con --force, --table, --company-id y --start-letter')
+        help='Forzar uso de tablas manuales de bronze. Si no se especifica, se lee desde metadatos')
+    parser.add_argument('--fivetran', action='store_true',
+        help='Forzar uso de tablas Fivetran. Si no se especifica, se lee desde metadatos')
+    parser.add_argument('--no-metadata', action='store_true',
+        help='Usar análisis dinámico en lugar de metadata_consolidated_tables (modo fallback)')
     parser.add_argument('--debug', '-d', action='store_true',
         help='Activar modo debug: muestra mensajes detallados de procesamiento y SQL generado')
     
     args = parser.parse_args()
+    
+    # Determinar use_bronze
+    use_bronze = None
+    if args.bronze:
+        use_bronze = True
+    elif args.fivetran:
+        use_bronze = False
     
     if args.force and not args.yes:
         print("🔄 MODO FORZADO ACTIVADO")
@@ -884,9 +1267,10 @@ if __name__ == "__main__":
         force_mode=args.force,
         start_from_letter=args.start_letter,
         specific_table=args.table,
-        use_bronze=args.bronze,
+        use_bronze=use_bronze,
         specific_company_id=args.company_id,
-        debug=args.debug
+        debug=args.debug,
+        use_metadata=not args.no_metadata
     )
     
     print(f"\n✅ Proceso completado exitosamente!")
