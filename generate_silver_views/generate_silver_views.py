@@ -84,16 +84,6 @@ def get_companies_info():
         print(f"❌ Error al obtener información de compañías: {str(e)}")
         raise
 
-def get_manual_table_name(table_name):
-    """
-    Obtiene el nombre de la tabla manual agregando 's' al final
-    Por ejemplo: 'campaign' -> 'campaigns'
-    
-    Las tablas manuales en bronze siempre terminan en 's' para
-    diferenciarlas de las tablas originales.
-    """
-    return f"{table_name}s"
-
 def get_table_metadata_from_metadata_table(table_name):
     """
     Obtiene el layout y configuración de una tabla desde metadata_consolidated_tables
@@ -202,8 +192,9 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
     """
     if use_bronze:
         dataset_name = "bronze"
-        # Usar el nombre mapeado para tablas manuales
-        source_table = get_manual_table_name(table_name)
+        # Usar directamente el nombre desde management (fuente de verdad)
+        # No modificar el nombre, usar exactamente como está en metadata_consolidated_tables
+        source_table = table_name
     else:
         dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
         source_table = table_name
@@ -223,7 +214,28 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
 
         query_job = client.query(query)
         results = query_job.result()
-        fields_df = pd.DataFrame([dict(row) for row in results])
+        
+        # Convertir resultados a lista de diccionarios
+        rows_list = []
+        for row in results:
+            try:
+                row_dict = dict(row)
+                # Validar que tiene column_name
+                if 'column_name' in row_dict and row_dict['column_name']:
+                    rows_list.append(row_dict)
+            except Exception as row_error:
+                print(f"    ⚠️  Error procesando fila: {str(row_error)}")
+                continue
+        
+        fields_df = pd.DataFrame(rows_list)
+        
+        # Validar que el DataFrame no esté vacío
+        if fields_df.empty:
+            print(f"    ⚠️  No se encontraron campos en {project_id}.{dataset_name}.{source_table}")
+            print(f"    💡 El nombre '{table_name}' viene de metadata_consolidated_tables (fuente de verdad)")
+            print(f"    💡 Verifica que la tabla '{source_table}' existe en {project_id}.{dataset_name}")
+            print(f"    💡 Si el nombre en Bronze es diferente, actualiza el nombre en metadata_consolidated_tables")
+            return pd.DataFrame()
         
         # Ahora obtener información de campos REPEATED desde COLUMN_FIELD_PATHS
         repeated_query = f"""
@@ -318,7 +330,7 @@ def analyze_table_fields_across_companies(table_name, use_bronze=False, companie
         
         if fields_df.empty:
             source_type = "manual (bronze)" if use_bronze else "original"
-            source_name = get_manual_table_name(table_name) if use_bronze else table_name
+            source_name = table_name  # Usar directamente el nombre desde management
             print(f"  ⚠️  {company_name}: Tabla {source_type} '{source_name}' no encontrada")
             continue
             
@@ -417,20 +429,31 @@ def generate_silver_view_sql_from_metadata(table_name, company_result, layout_de
     
     if 'fields_df' in company_result and company_result['fields_df'] is not None:
         company_fields_df = company_result['fields_df']
-        for _, row in company_fields_df.iterrows():
-            field_name = row['column_name']
-            company_fields[field_name] = row['data_type']
-            if 'alias_name' in row:
-                company_aliases[field_name] = row['alias_name']
-            if row.get('is_repeated_record', False):
-                company_repeated_records[field_name] = True
+        # Validar que el DataFrame no esté vacío y tenga las columnas necesarias
+        if not company_fields_df.empty and 'column_name' in company_fields_df.columns:
+            for _, row in company_fields_df.iterrows():
+                # Validar que la fila tenga la columna column_name
+                if 'column_name' not in row or pd.isna(row.get('column_name')):
+                    continue
+                field_name = row['column_name']
+                company_fields[field_name] = row.get('data_type', 'STRING')
+                if 'alias_name' in row and pd.notna(row.get('alias_name')):
+                    company_aliases[field_name] = row['alias_name']
+                if row.get('is_repeated_record', False):
+                    company_repeated_records[field_name] = True
+        elif company_fields_df.empty:
+            print(f"    ⚠️  DataFrame vacío para {company_name} - {table_name}")
+        elif 'column_name' not in company_fields_df.columns:
+            print(f"    ⚠️  DataFrame no tiene columna 'column_name' para {company_name} - {table_name}")
+            print(f"    📋 Columnas disponibles: {list(company_fields_df.columns)}")
     
     company_field_names = set(company_fields.keys())
     
     # Determinar dataset y nombre de tabla fuente
     if use_bronze:
         source_dataset = "bronze"
-        source_table = get_manual_table_name(table_name)
+        # Usar directamente el nombre desde management (fuente de verdad)
+        source_table = table_name
     else:
         source_dataset = f"servicetitan_{project_id.replace('-', '_')}"
         source_table = table_name
@@ -548,7 +571,8 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
     # Determinar dataset y nombre de tabla fuente
     if use_bronze:
         source_dataset = "bronze"
-        source_table = get_manual_table_name(table_name)
+        # Usar directamente el nombre desde management (fuente de verdad)
+        source_table = table_name
     else:
         source_dataset = f"servicetitan_{project_id.replace('-', '_')}"
         source_table = table_name
@@ -971,17 +995,35 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
                     continue
                 
                 # Obtener campos de la tabla en esta compañía
-                fields_df = get_table_fields_with_types(project_id, table_name, table_use_bronze)
-                
-                if not fields_df.empty:
-                    # Filtrar campos de control del ETL
-                    filtered_fields_df = fields_df[~fields_df['column_name'].str.startswith('_')]
-                    company_results.append({
-                        'company_id': company['company_id'],
-                        'company_name': company['company_name'],
-                        'project_id': project_id,
-                        'fields_df': filtered_fields_df
-                    })
+                try:
+                    fields_df = get_table_fields_with_types(project_id, table_name, table_use_bronze)
+                    
+                    # Validar que el DataFrame tenga las columnas necesarias
+                    if not fields_df.empty and 'column_name' in fields_df.columns:
+                        # Filtrar campos de control del ETL
+                        filtered_fields_df = fields_df[~fields_df['column_name'].str.startswith('_')]
+                        
+                        # Validar nuevamente después del filtro
+                        if not filtered_fields_df.empty:
+                            company_results.append({
+                                'company_id': company['company_id'],
+                                'company_name': company['company_name'],
+                                'project_id': project_id,
+                                'fields_df': filtered_fields_df
+                            })
+                        else:
+                            print(f"    ⚠️  {company['company_name']}: No hay campos válidos después de filtrar campos de control")
+                    elif fields_df.empty:
+                        print(f"    ⚠️  {company['company_name']}: DataFrame vacío para {table_name}")
+                    else:
+                        print(f"    ⚠️  {company['company_name']}: DataFrame no tiene columna 'column_name'")
+                        print(f"    📋 Columnas disponibles: {list(fields_df.columns)}")
+                except Exception as e:
+                    print(f"    ❌ Error obteniendo campos para {company['company_name']} - {table_name}: {str(e)}")
+                    import traceback
+                    if DEBUG_MODE:
+                        traceback.print_exc()
+                    continue
             
             if not company_results:
                 print(f"  ⏭️  Saltando tabla '{table_name}' - no se encontraron datos en ninguna compañía")
@@ -1021,49 +1063,77 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
                     continue
                 
                 # Ejecutar vista directamente en BigQuery con reconexión automática
-                max_retries = 3
-                for attempt in range(max_retries):
-                    try:
-                        if attempt > 0:
-                            print(f"    🔄 Reintento {attempt + 1}/{max_retries} para {company_name}")
-                            time.sleep(2)
-                        
-                        print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
-                        if DEBUG_MODE:
-                            print(f"\n{'='*80}")
-                            print(f"SQL GENERADO:")
-                            print(f"{'='*80}")
-                            print(sql_content)
-                            print(f"{'='*80}\n")
-                        query_job = client.query(sql_content)
-                        query_job.result()
-                        print(f"    ✅ Vista creada: {company_name}")
-                        company_sql_files.append(f"SUCCESS: {company_name}")
-                        
-                        tracking_manager.update_status(
-                            company_id=company_result['company_id'],
-                            table_name=table_name,
-                            status=1,
-                            notes=f"Vista creada exitosamente en {project_id}.silver (desde metadatos)"
-                        )
-                        break
-                    
-                    except Exception as e:
-                        error_msg = str(e)
-                        if attempt == max_retries - 1:
-                            print(f"    ❌ Error final creando vista {company_name}: {error_msg}")
-                            company_sql_files.append(f"ERROR: {company_name}")
+                # Verificar si la vista ya existe antes de crearla
+                view_exists = False
+                try:
+                    check_view_query = f"""
+                        SELECT 1
+                        FROM `{project_id}.silver.INFORMATION_SCHEMA.TABLES`
+                        WHERE table_name = 'vw_{table_name}'
+                        LIMIT 1
+                    """
+                    check_result = list(client.query(check_view_query).result())
+                    if check_result:
+                        view_exists = True
+                        print(f"    ℹ️  Vista ya existe: {project_id}.silver.vw_{table_name}")
+                except Exception:
+                    view_exists = False
+                
+                # Si la vista ya existe, solo actualizar tracking sin recrearla
+                if view_exists:
+                    print(f"    ✅ Vista existente detectada: {company_name}")
+                    company_sql_files.append(f"EXISTS: {company_name}")
+                    tracking_manager.update_status(
+                        company_id=company_result['company_id'],
+                        table_name=table_name,
+                        status=1,
+                        notes=f"Vista ya existía en {project_id}.silver (verificada y registrada)"
+                    )
+                else:
+                    # Crear la vista si no existe
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            if attempt > 0:
+                                print(f"    🔄 Reintento {attempt + 1}/{max_retries} para {company_name}")
+                                time.sleep(2)
+                            
+                            print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
+                            if DEBUG_MODE:
+                                print(f"\n{'='*80}")
+                                print(f"SQL GENERADO:")
+                                print(f"{'='*80}")
+                                print(sql_content)
+                                print(f"{'='*80}\n")
+                            query_job = client.query(sql_content)
+                            query_job.result()
+                            print(f"    ✅ Vista creada: {company_name}")
+                            company_sql_files.append(f"SUCCESS: {company_name}")
                             
                             tracking_manager.update_status(
                                 company_id=company_result['company_id'],
                                 table_name=table_name,
-                                status=2,
-                                error_message=error_msg,
-                                notes=f"Error al crear vista en {project_id}.silver"
+                                status=1,
+                                notes=f"Vista creada exitosamente en {project_id}.silver (desde metadatos)"
                             )
-                        else:
-                            print(f"    ⚠️  Error en intento {attempt + 1}: {error_msg}")
-                            continue
+                            break
+                            
+                        except Exception as e:
+                            error_msg = str(e)
+                            if attempt == max_retries - 1:
+                                print(f"    ❌ Error final creando vista {company_name}: {error_msg}")
+                                company_sql_files.append(f"ERROR: {company_name}")
+                                
+                                tracking_manager.update_status(
+                                    company_id=company_result['company_id'],
+                                    table_name=table_name,
+                                    status=2,
+                                    error_message=error_msg,
+                                    notes=f"Error al crear vista en {project_id}.silver"
+                                )
+                            else:
+                                print(f"    ⚠️  Error en intento {attempt + 1}: {error_msg}")
+                                continue
             
             # Guardar resumen para esta tabla
             all_results[table_name] = {
