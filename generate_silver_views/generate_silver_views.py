@@ -1063,77 +1063,50 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
                     continue
                 
                 # Ejecutar vista directamente en BigQuery con reconexión automática
-                # Verificar si la vista ya existe antes de crearla
-                view_exists = False
-                try:
-                    check_view_query = f"""
-                        SELECT 1
-                        FROM `{project_id}.silver.INFORMATION_SCHEMA.TABLES`
-                        WHERE table_name = 'vw_{table_name}'
-                        LIMIT 1
-                    """
-                    check_result = list(client.query(check_view_query).result())
-                    if check_result:
-                        view_exists = True
-                        print(f"    ℹ️  Vista ya existe: {project_id}.silver.vw_{table_name}")
-                except Exception:
-                    view_exists = False
-                
-                # Si la vista ya existe, solo actualizar tracking sin recrearla
-                if view_exists:
-                    print(f"    ✅ Vista existente detectada: {company_name}")
-                    company_sql_files.append(f"EXISTS: {company_name}")
-                    tracking_manager.update_status(
-                        company_id=company_result['company_id'],
-                        table_name=table_name,
-                        status=1,
-                        notes=f"Vista ya existía en {project_id}.silver (verificada y registrada)"
-                    )
-                else:
-                    # Crear la vista si no existe
-                    max_retries = 3
-                    for attempt in range(max_retries):
-                        try:
-                            if attempt > 0:
-                                print(f"    🔄 Reintento {attempt + 1}/{max_retries} para {company_name}")
-                                time.sleep(2)
-                            
-                            print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
-                            if DEBUG_MODE:
-                                print(f"\n{'='*80}")
-                                print(f"SQL GENERADO:")
-                                print(f"{'='*80}")
-                                print(sql_content)
-                                print(f"{'='*80}\n")
-                            query_job = client.query(sql_content)
-                            query_job.result()
-                            print(f"    ✅ Vista creada: {company_name}")
-                            company_sql_files.append(f"SUCCESS: {company_name}")
+                # CREATE OR REPLACE VIEW es idempotente - siempre recrea/crea la vista
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        if attempt > 0:
+                            print(f"    🔄 Reintento {attempt + 1}/{max_retries} para {company_name}")
+                            time.sleep(2)
+                        
+                        print(f"    🔄 Creando vista: {project_id}.silver.vw_{table_name}")
+                        if DEBUG_MODE:
+                            print(f"\n{'='*80}")
+                            print(f"SQL GENERADO:")
+                            print(f"{'='*80}")
+                            print(sql_content)
+                            print(f"{'='*80}\n")
+                        query_job = client.query(sql_content)
+                        query_job.result()
+                        print(f"    ✅ Vista creada: {company_name}")
+                        company_sql_files.append(f"SUCCESS: {company_name}")
+                        
+                        tracking_manager.update_status(
+                            company_id=company_result['company_id'],
+                            table_name=table_name,
+                            status=1,
+                            notes=f"Vista creada exitosamente en {project_id}.silver (desde metadatos)"
+                        )
+                        break
+                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        if attempt == max_retries - 1:
+                            print(f"    ❌ Error final creando vista {company_name}: {error_msg}")
+                            company_sql_files.append(f"ERROR: {company_name}")
                             
                             tracking_manager.update_status(
                                 company_id=company_result['company_id'],
                                 table_name=table_name,
-                                status=1,
-                                notes=f"Vista creada exitosamente en {project_id}.silver (desde metadatos)"
+                                status=2,
+                                error_message=error_msg,
+                                notes=f"Error al crear vista en {project_id}.silver"
                             )
-                            break
-                            
-                        except Exception as e:
-                            error_msg = str(e)
-                            if attempt == max_retries - 1:
-                                print(f"    ❌ Error final creando vista {company_name}: {error_msg}")
-                                company_sql_files.append(f"ERROR: {company_name}")
-                                
-                                tracking_manager.update_status(
-                                    company_id=company_result['company_id'],
-                                    table_name=table_name,
-                                    status=2,
-                                    error_message=error_msg,
-                                    notes=f"Error al crear vista en {project_id}.silver"
-                                )
-                            else:
-                                print(f"    ⚠️  Error en intento {attempt + 1}: {error_msg}")
-                                continue
+                        else:
+                            print(f"    ⚠️  Error en intento {attempt + 1}: {error_msg}")
+                            continue
             
             # Guardar resumen para esta tabla
             all_results[table_name] = {
