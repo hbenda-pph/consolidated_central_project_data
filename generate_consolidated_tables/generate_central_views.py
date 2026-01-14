@@ -38,15 +38,14 @@ def create_central_views():
     for row in tables:
         total_tables += 1
         table_name = row.table_name
-        base_name = table_name.replace('consolidated_', '')
-        view_name = f"vw_{base_name}"
+        view_name = f"vw_{table_name}"
         
         print(f"[{total_tables}] {view_name}")
         
         # Crear vista
         view_query = f"""
         /*
-         * Vista Silver centralizada para {base_name}
+         * Vista Silver centralizada para {table_name}
          * Generada automáticamente
          */
         CREATE OR REPLACE VIEW `{PROJECT_CENTRAL}.{DATASET_SILVER}.{view_name}`

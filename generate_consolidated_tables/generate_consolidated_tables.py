@@ -38,7 +38,17 @@ def get_metadata_dict():
     try:
         query_job = client.query(query)
         results = query_job.result()
-        df = pd.DataFrame([dict(row) for row in results])
+        
+        # Convertir resultados a lista de dicts
+        rows_list = []
+        for row in results:
+            rows_list.append({
+                'table_name': row.table_name,
+                'partition_fields': row.partition_fields,
+                'cluster_fields': row.cluster_fields
+            })
+        
+        df = pd.DataFrame(rows_list)
         
         print(f"🔍 DEBUG: Filas obtenidas de metadatos: {len(df)}")
         
@@ -59,6 +69,8 @@ def get_metadata_dict():
         return metadata_dict
     except Exception as e:
         print(f"⚠️  Error cargando metadatos: {str(e)}")
+        import traceback
+        traceback.print_exc()
         print("   Usando configuración por defecto para todas las tablas")
         return {}
 
@@ -70,6 +82,7 @@ def get_available_tables():
     query = f"""
         SELECT table_name
         FROM `{PROJECT_CENTRAL}.{DATASET_MANAGEMENT}.metadata_consolidated_tables`
+        WHERE table_name IS NOT NULL
         ORDER BY table_name
     """
     
@@ -83,55 +96,52 @@ def get_available_tables():
         
     except Exception as e:
         print(f"❌ Error obteniendo tablas desde metadatos: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return []
 
 def get_companies_for_table(table_name):
-    """Obtiene compañías que tienen una vista Silver específica"""
+    """
+    Obtiene compañías que tienen una vista Silver específica exitosamente generada.
+    Usa companies_consolidated como fuente de verdad (consolidated_status = 1)
+    """
     query = f"""
         SELECT 
-            company_id,
-            company_name,
-            company_project_id
-        FROM `{PROJECT_CENTRAL}.{DATASET_SETTINGS}.companies`
-        WHERE company_fivetran_status = TRUE
-          AND company_bigquery_status = TRUE
-          AND company_project_id IS NOT NULL
-        ORDER BY company_id
+            c.company_id,
+            c.company_name,
+            c.company_project_id
+        FROM `{PROJECT_CENTRAL}.{DATASET_SETTINGS}.companies_consolidated` cc
+        JOIN `{PROJECT_CENTRAL}.{DATASET_SETTINGS}.companies` c
+            ON cc.company_id = c.company_id
+        WHERE cc.table_name = '{table_name}'
+          AND cc.consolidated_status = 1  -- Solo vistas Silver exitosas
+          AND c.company_fivetran_status = TRUE
+          AND c.company_bigquery_status = TRUE
+          AND c.company_project_id IS NOT NULL
+        ORDER BY c.company_id
     """
     
     try:
         query_job = client.query(query)
         results = query_job.result()
-        all_companies = pd.DataFrame([dict(row) for row in results])
         
-        # Filtrar compañías que tienen la vista
-        companies_with_view = []
+        # Convertir resultados a lista de dicts
+        companies_list = []
+        for row in results:
+            companies_list.append({
+                'company_id': row.company_id,
+                'company_name': row.company_name,
+                'company_project_id': row.company_project_id
+            })
         
-        for _, company in all_companies.iterrows():
-            try:
-                # Verificar si la vista existe en esta compañía
-                check_query = f"""
-                    SELECT 1
-                    FROM `{company['company_project_id']}.silver.INFORMATION_SCHEMA.TABLES`
-                    WHERE table_name = 'vw_{table_name}'
-                    LIMIT 1
-                """
-                
-                check_job = client.query(check_query)
-                check_results = list(check_job.result())
-                
-                if check_results:
-                    companies_with_view.append(company)
-                    
-            except Exception:
-                # Saltar compañías sin la vista
-                continue
-        
-        df = pd.DataFrame(companies_with_view)
+        df = pd.DataFrame(companies_list)
+        print(f"  📊 Compañías con vista Silver exitosa: {len(df)}")
         return df
         
     except Exception as e:
         print(f"  ⚠️  Error obteniendo compañías: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return pd.DataFrame()
 
 def verify_field_exists(table_name, field_name, company_project_id):
