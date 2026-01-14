@@ -113,11 +113,22 @@ def get_available_tables():
         traceback.print_exc()
         return []
 
-def get_companies_for_table(table_name):
+def get_companies_for_table(table_name, company_id_filter=None):
     """
     Obtiene compañías que tienen una vista Silver específica exitosamente generada.
     Usa companies_consolidated como fuente de verdad (consolidated_status = 1)
+    
+    Args:
+        table_name: Nombre de la tabla
+        company_id_filter: Si se proporciona, filtra por rango de company_ids.
+                          Puede ser una lista [min_id, max_id] o None para todas.
     """
+    # Construir filtro de company_id si se proporciona
+    company_filter = ""
+    if company_id_filter:
+        min_id, max_id = company_id_filter
+        company_filter = f"  AND c.company_id >= {min_id} AND c.company_id <= {max_id}"
+    
     query = f"""
         SELECT 
             c.company_id,
@@ -131,6 +142,7 @@ def get_companies_for_table(table_name):
           AND c.company_fivetran_status = TRUE
           AND c.company_bigquery_status = TRUE
           AND c.company_project_id IS NOT NULL
+          {company_filter}
         ORDER BY c.company_id
     """
     
@@ -148,7 +160,10 @@ def get_companies_for_table(table_name):
             })
         
         df = pd.DataFrame(companies_list)
-        print(f"  📊 Compañías con vista Silver exitosa: {len(df)}")
+        if company_id_filter:
+            print(f"  📊 Compañías con vista Silver exitosa (filtro {company_id_filter[0]}-{company_id_filter[1]}): {len(df)}")
+        else:
+            print(f"  📊 Compañías con vista Silver exitosa: {len(df)}")
         return df
         
     except Exception as e:
@@ -626,7 +641,7 @@ AS
         print(f"     Tabla creada OK - Scheduled Query se puede crear manualmente después")
         return False
 
-def create_all_consolidated_tables(create_schedules=True, start_from_letter='a', specific_table=None):
+def create_all_consolidated_tables(create_schedules=True, start_from_letter='a', specific_table=None, company_id_filter=None):
     """
     Función principal para crear tablas consolidadas
     
@@ -634,16 +649,29 @@ def create_all_consolidated_tables(create_schedules=True, start_from_letter='a',
         create_schedules (bool): Si True, crea scheduled queries para refresh automático
         start_from_letter (str): Letra inicial para filtrar tablas (útil para reiniciar)
         specific_table (str): Si se proporciona, genera solo esta tabla
+        company_id_filter: Lista [min_id, max_id] para filtrar compañías (None = todas)
         
     Returns:
         dict: Estadísticas de ejecución
     """
+    # Detectar si estamos en modo paralelo (Cloud Run Jobs con múltiples tareas)
+    import os
+    task_index = int(os.environ.get('CLOUD_RUN_TASK_INDEX', '0'))
+    task_count = int(os.environ.get('CLOUD_RUN_TASK_COUNT', '1'))
+    is_parallel = task_count > 1
+    
     print("=" * 80)
     print("🚀 CREAR TABLAS CONSOLIDADAS")
     print(f"   Proyecto Central: {PROJECT_CENTRAL}")
     print(f"   Dataset Bronze: {DATASET_BRONZE}")
     print(f"   Scheduled Queries: {'SÍ' if create_schedules else 'NO'}")
     print(f"   Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    if is_parallel:
+        print(f"   🚀 MODO PARALELO: Tarea {task_index + 1}/{task_count}")
+        if company_id_filter:
+            print(f"   📊 Filtro de compañías: {company_id_filter[0]}-{company_id_filter[1]}")
+        else:
+            print(f"   📊 Procesando TODAS las compañías (sin filtro)")
     print("=" * 80)
     
     # 1. Cargar metadatos
@@ -671,6 +699,18 @@ def create_all_consolidated_tables(create_schedules=True, start_from_letter='a',
         # Aplicar filtro de letra inicial
         available_tables = [t for t in all_tables if t >= start_from_letter]
         
+        # Si está en modo paralelo, dividir las tablas entre tareas
+        if is_parallel and not specific_table:
+            total_tables = len(available_tables)
+            tables_per_task = total_tables // task_count
+            remainder = total_tables % task_count
+            
+            start_idx = task_index * tables_per_task + min(task_index, remainder)
+            end_idx = start_idx + tables_per_task + (1 if task_index < remainder else 0)
+            
+            available_tables = available_tables[start_idx:end_idx]
+            print(f"🔍 FILTRO PARALELO: Tarea {task_index + 1}/{task_count} procesará {len(available_tables)} tablas (índices {start_idx}-{end_idx-1})")
+        
         if start_from_letter != 'a':
             print(f"🔍 FILTRO ACTIVO: Procesando tablas desde '{start_from_letter}'")
         
@@ -690,8 +730,8 @@ def create_all_consolidated_tables(create_schedules=True, start_from_letter='a',
     for i, table_name in enumerate(available_tables, 1):
         print(f"\n[{i}/{len(available_tables)}] {table_name}")
         
-        # Obtener compañías para esta tabla
-        companies_df = get_companies_for_table(table_name)
+        # Obtener compañías para esta tabla (con filtro si está en modo paralelo)
+        companies_df = get_companies_for_table(table_name, company_id_filter)
         
         if companies_df.empty:
             print(f"  ⚠️  Sin compañías - SALTAR")
