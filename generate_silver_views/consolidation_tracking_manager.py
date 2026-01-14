@@ -6,14 +6,15 @@ Maneja el tracking detallado del estado de consolidación por compañía y tabla
 import pandas as pd
 from google.cloud import bigquery
 from datetime import datetime
-from config import PROJECT_SOURCE, DATASET_NAME
+from config import PROJECT_CENTRAL, DATASET_NAME
 
 class ConsolidationTrackingManager:
     """Maneja el tracking de consolidación por compañía y tabla"""
     
     def __init__(self):
-        self.client = bigquery.Client(project=PROJECT_SOURCE)
-        self.table_id = f"{PROJECT_SOURCE}.{DATASET_NAME}.companies_consolidated"
+        # Usar pph-central donde está la tabla companies_consolidated
+        self.client = bigquery.Client(project=PROJECT_CENTRAL)
+        self.table_id = f"{PROJECT_CENTRAL}.{DATASET_NAME}.companies_consolidated"
         self.ensure_table_exists()
     
     def ensure_table_exists(self):
