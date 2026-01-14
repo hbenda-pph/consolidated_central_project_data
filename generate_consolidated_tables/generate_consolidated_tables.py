@@ -23,12 +23,13 @@ client = bigquery.Client(project=PROJECT_CENTRAL)
 transfer_client = bigquery_datatransfer_v1.DataTransferServiceClient()
 
 def get_metadata_dict():
-    """Obtiene metadatos de particionamiento y clusterizado"""
+    """Obtiene metadatos de particionamiento, clusterizado y layout de Silver"""
     query = f"""
         SELECT 
             table_name,
             partition_fields,
-            cluster_fields
+            cluster_fields,
+            silver_layout_definition
         FROM `{PROJECT_CENTRAL}.{DATASET_MANAGEMENT}.metadata_consolidated_tables`
         ORDER BY table_name
     """
@@ -45,7 +46,8 @@ def get_metadata_dict():
             rows_list.append({
                 'table_name': row.table_name,
                 'partition_fields': row.partition_fields,
-                'cluster_fields': row.cluster_fields
+                'cluster_fields': row.cluster_fields,
+                'silver_layout_definition': row.silver_layout_definition
             })
         
         df = pd.DataFrame(rows_list)
@@ -59,9 +61,20 @@ def get_metadata_dict():
         
         metadata_dict = {}
         for _, row in df.iterrows():
+            # Convertir ARRAY<STRUCT> a lista de diccionarios si existe
+            layout_list = []
+            if row['silver_layout_definition']:
+                for field_struct in row['silver_layout_definition']:
+                    layout_list.append({
+                        'field_name': field_struct.get('field_name'),
+                        'target_type': field_struct.get('target_type'),
+                        'field_order': field_struct.get('field_order')
+                    })
+            
             metadata_dict[row['table_name']] = {
                 'partition_fields': row['partition_fields'],
-                'cluster_fields': row['cluster_fields']
+                'cluster_fields': row['cluster_fields'],
+                'silver_layout_definition': layout_list
             }
         
         print(f"✅ Metadatos cargados: {len(metadata_dict)} tablas")
@@ -252,9 +265,71 @@ def validate_silver_view_schemas(table_name, companies_df):
     is_valid = len(error_messages) == 0
     return is_valid, reference_schema, error_messages
 
-def detect_partition_field(table_name, sample_company_project_id):
-    """Detecta un campo de fecha apropiado para particionar"""
-    # Lista de campos comunes de fecha (en orden de preferencia)
+def extract_date_fields_from_layout(silver_layout_definition):
+    """
+    Extrae campos de fecha del silver_layout_definition
+    
+    Args:
+        silver_layout_definition: Lista de diccionarios con campos del layout
+        
+    Returns:
+        list: Lista de nombres de campos de tipo fecha, ordenados por field_order
+    """
+    if not silver_layout_definition:
+        return []
+    
+    date_types = ['DATE', 'TIMESTAMP', 'DATETIME']
+    date_fields = []
+    
+    for field_info in silver_layout_definition:
+        field_name = field_info.get('field_name')
+        target_type = field_info.get('target_type', '').upper()
+        field_order = field_info.get('field_order', 999)
+        
+        if target_type in date_types:
+            date_fields.append({
+                'field_name': field_name,
+                'field_order': field_order,
+                'target_type': target_type
+            })
+    
+    # Ordenar por field_order (prioridad) y luego por tipo (DATE > TIMESTAMP > DATETIME)
+    type_priority = {'DATE': 1, 'TIMESTAMP': 2, 'DATETIME': 3}
+    date_fields.sort(key=lambda x: (x['field_order'], type_priority.get(x['target_type'], 99)))
+    
+    return [f['field_name'] for f in date_fields]
+
+def detect_partition_field(table_name, sample_company_project_id, silver_layout_definition=None):
+    """
+    Detecta un campo de fecha apropiado para particionar
+    
+    Prioridad:
+    1. Campos de fecha del silver_layout_definition (si está disponible)
+    2. Lista hardcodeada de campos comunes
+    3. Cualquier campo de fecha disponible en la vista
+    4. None (la tabla se creará sin partición como último recurso)
+    
+    Args:
+        table_name: Nombre de la tabla
+        sample_company_project_id: Proyecto de ejemplo para verificar existencia
+        silver_layout_definition: Layout de Silver (lista de dicts) o None
+        
+    Returns:
+        str: Nombre del campo de partición o None
+    """
+    # PRIORIDAD 1: Extraer campos de fecha del layout
+    if silver_layout_definition:
+        layout_date_fields = extract_date_fields_from_layout(silver_layout_definition)
+        if layout_date_fields:
+            # Verificar que el campo existe en la vista
+            for field_name in layout_date_fields:
+                if verify_field_exists(table_name, field_name, sample_company_project_id):
+                    print(f"    ✅ Campo de partición desde layout: {field_name}")
+                    return field_name
+                else:
+                    print(f"    ⚠️  Campo '{field_name}' del layout no existe en vista, probando siguiente...")
+    
+    # PRIORIDAD 2: Lista hardcodeada de campos comunes (último recurso antes de fallar)
     date_fields = ['created_on', 'created_at', 'date', 'timestamp', 'modified_on', 'updated_on']
     
     try:
@@ -271,16 +346,19 @@ def detect_partition_field(table_name, sample_company_project_id):
         results = query_job.result()
         date_columns = [row.column_name for row in results]
         
-        # Buscar el primer campo de fecha común
+        # Buscar el primer campo de fecha común (hardcodeado)
         for field in date_fields:
             if field in date_columns:
+                print(f"    ✅ Campo de partición desde lista común: {field}")
                 return field
         
-        # Si no encontró ninguno común, usar el primero disponible
+        # PRIORIDAD 3: Si no encontró ninguno común, usar el primero disponible
         if date_columns:
+            print(f"    ✅ Campo de partición (primero disponible): {date_columns[0]}")
             return date_columns[0]
         
-        # Sin campos de fecha
+        # Sin campos de fecha - retornar None (la tabla se creará sin partición)
+        print(f"    ⚠️  No se encontraron campos de fecha para particionar")
         return None
         
     except Exception as e:
@@ -295,11 +373,17 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
         return False, None, []
     
     # Obtener metadatos
+    silver_layout_definition = None
     if table_name in metadata_dict:
         metadata = metadata_dict[table_name]
         print(f"  🔍 DEBUG: Metadatos encontrados para '{table_name}'")
         print(f"     partition_fields: {metadata['partition_fields']} (tipo: {type(metadata['partition_fields'])})")
         print(f"     cluster_fields: {metadata['cluster_fields']} (tipo: {type(metadata['cluster_fields'])})")
+        
+        # Obtener layout de Silver si está disponible
+        silver_layout_definition = metadata.get('silver_layout_definition', None)
+        if silver_layout_definition:
+            print(f"     silver_layout_definition: {len(silver_layout_definition)} campos disponibles")
         
         # Manejar arrays de BigQuery
         partition_fields_list = list(metadata['partition_fields']) if metadata['partition_fields'] else []
@@ -335,13 +419,18 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
     # Si no hay partition_field, intentar detectarlo automáticamente
     if not partition_field:
         print(f"  🔍 Detectando campo de particionamiento automáticamente...")
-        partition_field = detect_partition_field(table_name, companies_df.iloc[0]['company_project_id'])
+        partition_field = detect_partition_field(
+            table_name, 
+            companies_df.iloc[0]['company_project_id'],
+            silver_layout_definition
+        )
         
         if not partition_field:
-            print(f"  ❌ ERROR: No se encontró campo de fecha para particionar")
+            print(f"  ⚠️  ADVERTENCIA: No se encontró campo de fecha para particionar")
+            print(f"     La tabla se creará SIN particionamiento (no recomendado para tablas grandes)")
             print(f"     Solución: Agregar tabla '{table_name}' a metadata_consolidated_tables")
             print(f"     con un partition_field apropiado (created_on, created_at, etc.)")
-            return False, None, []
+            # NO retornar False - continuar para crear la tabla sin partición
     
     # Validar que todas las vistas tienen el mismo esquema
     print(f"  🔍 Validando esquemas de vistas Silver...")
@@ -373,11 +462,18 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
     # Configurar clusterizado
     cluster_sql = f"CLUSTER BY {', '.join(cluster_fields)}" if cluster_fields else ""
     
-    # SQL completo - SIEMPRE con particionamiento por MES
+    # SQL completo - con particionamiento por MES si hay partition_field
+    # Si no hay partition_field, crear sin partición (último recurso)
     # Lógica genérica para todas las tablas (las vistas Silver ya tienen campos aplanados)
+    if partition_field:
+        partition_sql = f"PARTITION BY DATE_TRUNC({partition_field}, MONTH)"
+    else:
+        partition_sql = ""
+        print(f"  ⚠️  Creando tabla SIN particionamiento (no hay campo de fecha disponible)")
+    
     create_sql = f"""
     CREATE OR REPLACE TABLE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
-    PARTITION BY DATE_TRUNC({partition_field}, MONTH)
+    {partition_sql}
     {cluster_sql}
     AS
     {' UNION ALL '.join(union_parts)}
@@ -385,7 +481,10 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
     
     print(f"  🔄 Creando tabla: consolidated_{table_name}")
     print(f"     📊 Compañías: {len(companies_df)}")
-    print(f"     ⚙️  Particionado: {partition_field} (por MES)")
+    if partition_field:
+        print(f"     ⚙️  Particionado: {partition_field} (por MES)")
+    else:
+        print(f"     ⚙️  Particionado: NINGUNO (tabla sin partición)")
     print(f"     🔗 Clusterizado: {cluster_fields}")
     # Mostrar SQL generado para revisión
     print(f"\n  📝 SQL GENERADO:")
@@ -449,6 +548,13 @@ def create_or_update_scheduled_query(table_name, companies_df, partition_field, 
     
     
     # Lógica genérica para todas las tablas (las vistas Silver ya tienen campos aplanados)
+    if partition_field:
+        partition_sql = f"PARTITION BY DATE_TRUNC({partition_field}, MONTH)"
+    else:
+        partition_sql = ""
+    
+    cluster_sql = f"CLUSTER BY ({', '.join(cluster_fields)})" if cluster_fields else ""
+    
     refresh_sql = f"""
 /*
  * Refresh completo para {table_name}
@@ -457,8 +563,8 @@ def create_or_update_scheduled_query(table_name, companies_df, partition_field, 
  * Generado automáticamente
  */
 CREATE OR REPLACE TABLE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
-PARTITION BY DATE_TRUNC({partition_field}, MONTH)
-CLUSTER BY ({', '.join(cluster_fields)})
+{partition_sql}
+{cluster_sql}
 AS
 {' UNION ALL '.join(union_parts)};
 """
