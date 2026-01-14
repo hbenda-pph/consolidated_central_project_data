@@ -18,6 +18,9 @@ DATASET_BRONZE = 'bronze'                  # Tablas consolidadas destino
 DATASET_SILVER = 'silver'                  # Vistas Silver (en proyectos shape-*)
 DATASET_MANAGEMENT = 'management'          # Metadatos y gobierno
 
+# NOTA: companies_consolidated ahora está en pph-central.settings
+# Los datos se copiaron desde DEV (platform-partners-des) y se mantendrán actualizados aquí
+
 # Clientes BigQuery
 client = bigquery.Client(project=PROJECT_CENTRAL)
 transfer_client = bigquery_datatransfer_v1.DataTransferServiceClient()
@@ -118,6 +121,8 @@ def get_companies_for_table(table_name, company_id_filter=None):
     Obtiene compañías que tienen una vista Silver específica exitosamente generada.
     Usa companies_consolidated como fuente de verdad (consolidated_status = 1)
     
+    NOTA: Lee desde pph-central.settings.companies_consolidated (datos copiados desde DEV)
+    
     Args:
         table_name: Nombre de la tabla
         company_id_filter: Si se proporciona, filtra por rango de company_ids.
@@ -147,6 +152,7 @@ def get_companies_for_table(table_name, company_id_filter=None):
     """
     
     try:
+        # Leer companies_consolidated desde Central (datos copiados desde DEV)
         query_job = client.query(query)
         results = query_job.result()
         
