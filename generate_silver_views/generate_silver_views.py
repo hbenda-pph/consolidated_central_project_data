@@ -857,6 +857,20 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
     print(f"   Fuente de layouts: {metadata_text}")
     print("=" * 80)
     
+    # Detectar si estamos en modo paralelo (Cloud Run Jobs con múltiples tareas)
+    # Cloud Run Jobs establece estas variables de entorno automáticamente:
+    # CLOUD_RUN_TASK_INDEX: índice de la tarea actual (0-based)
+    # CLOUD_RUN_TASK_COUNT: número total de tareas
+    task_index = int(os.environ.get('CLOUD_RUN_TASK_INDEX', '0'))
+    task_count = int(os.environ.get('CLOUD_RUN_TASK_COUNT', '1'))
+    is_parallel = task_count > 1
+    
+    if is_parallel:
+        print(f"\n{'='*80}")
+        print(f"🚀 MODO PARALELO ACTIVADO")
+        print(f"   Tarea: {task_index + 1}/{task_count}")
+        print(f"{'='*80}\n")
+    
     # Inicializar gestor de tracking
     tracking_manager = ConsolidationTrackingManager()
     
@@ -868,13 +882,34 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
         print("❌ No hay compañías activas para procesar")
         return {}, {}
     
-    # Filtrar por company_id si se especificó
+    total_companies = len(companies_df)
+    
+    # Filtrar por company_id si se especificó (prioridad sobre modo paralelo)
     if specific_company_id is not None:
         companies_df = companies_df[companies_df['company_id'] == specific_company_id]
         if companies_df.empty:
             print(f"❌ ERROR: No se encontró la compañía con company_id={specific_company_id}")
             return {}, {}
         print(f"🎯 Compañía específica: company_id={specific_company_id} ({companies_df.iloc[0]['company_name']})")
+    elif is_parallel:
+        # En modo paralelo, dividir las compañías entre las tareas
+        # Ordenar por company_id para distribución consistente
+        companies_df = companies_df.sort_values('company_id').reset_index(drop=True)
+        
+        # Calcular qué compañías procesa esta tarea
+        companies_per_task = total_companies // task_count
+        remainder = total_companies % task_count
+        
+        # Las primeras tareas procesan una compañía extra si hay resto
+        start_idx = task_index * companies_per_task + min(task_index, remainder)
+        end_idx = start_idx + companies_per_task + (1 if task_index < remainder else 0)
+        
+        # Filtrar compañías para esta tarea
+        companies_df = companies_df.iloc[start_idx:end_idx].reset_index(drop=True)
+        
+        print(f"🔄 Procesamiento paralelo: Tarea {task_index + 1}/{task_count}")
+        print(f"   Compañías asignadas: {len(companies_df)} de {total_companies} totales")
+        print(f"   Rango: compañías {start_idx + 1} a {end_idx} (company_id: {companies_df.iloc[0]['company_id']} - {companies_df.iloc[-1]['company_id']})")
     else:
         print(f"✅ Compañías encontradas: {len(companies_df)}")
     
