@@ -447,10 +447,11 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
         )
         
         if not partition_field:
-            print(f"  ⚠️  ADVERTENCIA: No se encontró campo de fecha para particionar")
-            print(f"     La tabla se creará SIN particionamiento (no recomendado para tablas grandes)")
-            print(f"     Solución: Agregar tabla '{table_name}' a metadata_consolidated_tables")
-            print(f"     con un partition_field apropiado (created_on, created_at, etc.)")
+            # Advertencia en MAYÚSCULAS y muy visible
+            print(f"\n{'='*80}")
+            print(f"  ⚠️⚠️  LA TABLA: {table_name.upper()} SE CREARÁ SIN PARTICIONAMIENTO")
+            print(f"  ⚠️⚠️  SOLUCIÓN: Agregar partition_fields en metadata_consolidated_tables para '{table_name}'")
+            print(f"{'='*80}\n")
             # NO retornar False - continuar para crear la tabla sin partición
     
     # Validar que todas las vistas tienen el mismo esquema
@@ -484,13 +485,13 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
     cluster_sql = f"CLUSTER BY {', '.join(cluster_fields)}" if cluster_fields else ""
     
     # SQL completo - con particionamiento por MES si hay partition_field
-    # Si no hay partition_field, crear sin partición (último recurso)
+    # Si no hay partition_field, crear sin partición (SIEMPRE crear la tabla)
     # Lógica genérica para todas las tablas (las vistas Silver ya tienen campos aplanados)
     if partition_field:
         partition_sql = f"PARTITION BY DATE_TRUNC({partition_field}, MONTH)"
     else:
         partition_sql = ""
-        print(f"  ⚠️  Creando tabla SIN particionamiento (no hay campo de fecha disponible)")
+        # La advertencia ya se mostró arriba, no repetir aquí
     
     create_sql = f"""
     CREATE OR REPLACE TABLE `{PROJECT_CENTRAL}.{DATASET_BRONZE}.consolidated_{table_name}`
@@ -696,6 +697,10 @@ def create_all_consolidated_tables(create_schedules=True, start_from_letter='a',
     if not all_tables:
         print("❌ No se encontraron tablas disponibles")
         sys.exit(1)
+    
+    # Verificar que tenemos todas las tablas de metadatos
+    print(f"📋 Total de tablas en metadatos: {len(all_tables)}")
+    print(f"💡 Se espera crear {len(all_tables)} tablas consolidadas (consolidated_<table_name>)")
     
     # Filtrar tablas según los parámetros
     if specific_table:
