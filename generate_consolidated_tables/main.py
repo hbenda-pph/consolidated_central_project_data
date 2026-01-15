@@ -39,13 +39,25 @@ if __name__ == "__main__":
         company_id_filter=company_id_filter  # Filtrar compañías si está en modo paralelo
     )
     
-    print(f"\n✅ CLOUD RUN JOB COMPLETADO!")
+    print(f"\n{'='*80}")
+    print(f"✅ CLOUD RUN JOB COMPLETADO!")
+    print(f"{'='*80}")
     if is_parallel:
         print(f"📊 Tarea {task_index + 1}/{task_count} - Tablas creadas: {stats['success_count']}")
         print(f"❌ Tarea {task_index + 1}/{task_count} - Errores: {stats['error_count']}")
+        print(f"⏭️  Tarea {task_index + 1}/{task_count} - Saltadas: {stats['skipped_count']}")
+        if stats['error_tables']:
+            print(f"\n📋 Tablas con errores en esta tarea:")
+            for table in stats['error_tables']:
+                print(f"   - {table}")
     else:
         print(f"📊 Tablas creadas: {stats['success_count']}")
         print(f"❌ Errores: {stats['error_count']}")
+        print(f"⏭️  Saltadas: {stats['skipped_count']}")
+        if stats['error_tables']:
+            print(f"\n📋 Tablas con errores:")
+            for table in stats['error_tables']:
+                print(f"   - {table}")
     print("=" * 80)
     
     # Exit code basado en resultado

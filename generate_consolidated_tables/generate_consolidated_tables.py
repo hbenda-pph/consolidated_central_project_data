@@ -508,10 +508,10 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
         print(f"     ⚙️  Particionado: NINGUNO (tabla sin partición)")
     print(f"     🔗 Clusterizado: {cluster_fields}")
     # Mostrar SQL generado para revisión
-    print(f"\n  📝 SQL GENERADO:")
-    print(f"  {'='*80}")
-    print(create_sql)
-    print(f"  {'='*80}\n")
+    #print(f"\n  📝 SQL GENERADO:")
+    #print(f"  {'='*80}")
+    #print(create_sql)
+    #print(f"  {'='*80}\n")
     
     try:
         query_job = client.query(create_sql)
@@ -591,7 +591,12 @@ AS
 """
     
     try:
-        parent = f"projects/{PROJECT_CENTRAL}/locations/us"
+        # IMPORTANTE: Los scheduled queries se crean en el proyecto donde se ejecuta el Job
+        # pero apuntan a pph-central donde están los datos
+        # El parent debe ser del proyecto donde corre el Job (obtenido desde variable de entorno)
+        import os
+        gcp_project = os.environ.get('GCP_PROJECT', PROJECT_CENTRAL)
+        parent = f"projects/{gcp_project}/locations/us"
         
         # Configuración del scheduled query
         transfer_config = bigquery_datatransfer_v1.TransferConfig(
@@ -745,22 +750,33 @@ def create_all_consolidated_tables(create_schedules=True, start_from_letter='a',
             continue
         
         # Crear tabla consolidada (retorna éxito, partition_field, cluster_fields)
-        table_created, partition_field, cluster_fields = create_consolidated_table(table_name, companies_df, metadata_dict)
-        
-        if table_created:
-            success_count += 1
+        try:
+            table_created, partition_field, cluster_fields = create_consolidated_table(table_name, companies_df, metadata_dict)
             
-            # Crear scheduled query solo si hay partition_field y está habilitado
-            if create_schedules and partition_field:
-                print(f"  📅 Configurando refresh automático...")
-                create_or_update_scheduled_query(table_name, companies_df, partition_field, cluster_fields)
-            elif not partition_field:
-                print(f"  ⚠️  Sin partition_field - No se crea scheduled query")
-            elif not create_schedules:
-                print(f"  ⏭️  Scheduled queries deshabilitados")
-        else:
+            if table_created:
+                success_count += 1
+                print(f"  ✅ TABLA {table_name}: CREADA EXITOSAMENTE")
+                
+                # Crear scheduled query solo si hay partition_field y está habilitado
+                if create_schedules and partition_field:
+                    print(f"  📅 Configurando refresh automático...")
+                    schedule_created = create_or_update_scheduled_query(table_name, companies_df, partition_field, cluster_fields)
+                    if not schedule_created:
+                        print(f"  ⚠️  ADVERTENCIA: No se pudo crear scheduled query para {table_name}")
+                elif not partition_field:
+                    print(f"  ⚠️  Sin partition_field - No se crea scheduled query")
+                elif not create_schedules:
+                    print(f"  ⏭️  Scheduled queries deshabilitados")
+            else:
+                error_count += 1
+                error_tables.append(table_name)
+                print(f"  ❌ TABLA {table_name}: ERROR - La tabla no se creó (ver logs arriba para detalles)")
+        except Exception as e:
             error_count += 1
             error_tables.append(table_name)
+            print(f"  ❌ TABLA {table_name}: EXCEPCIÓN NO CAPTURADA - {str(e)}")
+            import traceback
+            traceback.print_exc()
     
     # 4. Resumen final
     print("\n" + "=" * 80)
@@ -774,11 +790,14 @@ def create_all_consolidated_tables(create_schedules=True, start_from_letter='a',
     print("=" * 80)
     
     if error_tables:
-        print(f"\n⚠️  TABLAS CON ERRORES ({len(error_tables)}):")
-        for table in error_tables:
-            print(f"   - {table}")
+        print(f"\n{'='*80}")
+        print(f"❌ TABLAS CON ERRORES ({len(error_tables)})")
+        print(f"{'='*80}")
+        for idx, table in enumerate(error_tables, 1):
+            print(f"   {idx}. {table}")
         print(f"\n💡 NOTA: Revisa los logs arriba para detalles de cada error")
         print(f"   Las tablas con 'configuración incompatible' mantienen su versión anterior")
+        print(f"{'='*80}")
     
     # Instrucciones para Scheduled Queries
     if create_schedules and success_count > 0:

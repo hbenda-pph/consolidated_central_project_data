@@ -26,9 +26,11 @@ if [ -n "$1" ]; then
         echo "Uso: ./build_deploy.sh [dev|qua|pro]"
         echo ""
         echo "Ejemplos:"
-        echo "  ./build_deploy.sh dev    # Deploy en DEV (pph-central-dev)"
-        echo "  ./build_deploy.sh qua    # Deploy en QUA (pph-central-qua)"
-        echo "  ./build_deploy.sh pro    # Deploy en PRO (pph-central)"
+        echo "  ./build_deploy.sh dev    # Deploy en DEV (platform-partners-des)"
+        echo "  ./build_deploy.sh qua    # Deploy en QUA (platform-partners-qua)"
+        echo "  ./build_deploy.sh pro    # Deploy en PRO (platform-partners-pro)"
+        echo ""
+        echo "NOTA: El Job se ejecuta en platform-partners-*, pero los datos están en pph-central"
         echo ""
         echo "O ejecuta sin parámetros para usar el proyecto activo de gcloud"
         exit 1
@@ -38,42 +40,49 @@ else
     echo "🔍 Detectando ambiente desde proyecto activo de gcloud..."
     
     case "$CURRENT_PROJECT" in
-        pph-central-dev|platform-partners-des)
+        platform-partners-des)
             ENVIRONMENT="dev"
-            echo "✅ Detectado: DEV (pph-central-dev)"
+            echo "✅ Detectado: DEV (platform-partners-des)"
             ;;
-        pph-central-qua|platform-partners-qua)
+        platform-partners-qua)
             ENVIRONMENT="qua"
-            echo "✅ Detectado: QUA (pph-central-qua)"
+            echo "✅ Detectado: QUA (platform-partners-qua)"
             ;;
-        pph-central|constant-height-455614-i0)
+        platform-partners-pro|constant-height-455614-i0)
             ENVIRONMENT="pro"
-            echo "✅ Detectado: PRO (pph-central)"
+            echo "✅ Detectado: PRO (platform-partners-pro)"
+            ;;
+        pph-central*)
+            echo "⚠️  Proyecto activo: ${CURRENT_PROJECT}"
+            echo "⚠️  Este Job debe ejecutarse en platform-partners-*, no en pph-central"
+            echo "⚠️  pph-central es solo para datos. Usando DEV por defecto."
+            ENVIRONMENT="dev"
             ;;
         *)
             echo "⚠️  Proyecto activo: ${CURRENT_PROJECT}"
-            echo "⚠️  No se reconoce el proyecto. Usando PRO por defecto (pph-central)."
-            ENVIRONMENT="pro"
+            echo "⚠️  No se reconoce el proyecto. Usando DEV por defecto (platform-partners-des)."
+            ENVIRONMENT="dev"
             ;;
     esac
 fi
 
 # Configuración según ambiente
+# IMPORTANTE: El Job se ejecuta en platform-partners-*, pero los datos están en pph-central
 case "$ENVIRONMENT" in
     dev)
-        PROJECT_ID="pph-central-dev"
+        PROJECT_ID="platform-partners-des"
         JOB_NAME="create-consolidated-tables-job-dev"
-        SERVICE_ACCOUNT="data-consolidation@pph-central-dev.iam.gserviceaccount.com"
+        SERVICE_ACCOUNT="data-analytics@platform-partners-des.iam.gserviceaccount.com"
         ;;
     qua)
-        PROJECT_ID="pph-central-qua"
+        PROJECT_ID="platform-partners-qua"
         JOB_NAME="create-consolidated-tables-job-qua"
-        SERVICE_ACCOUNT="data-consolidation@pph-central-qua.iam.gserviceaccount.com"
+        SERVICE_ACCOUNT="data-analytics@platform-partners-qua.iam.gserviceaccount.com"
         ;;
     pro)
-        PROJECT_ID="pph-central"
+        PROJECT_ID="platform-partners-pro"
         JOB_NAME="create-consolidated-tables-job"
-        SERVICE_ACCOUNT="data-consolidation@pph-central.iam.gserviceaccount.com"
+        SERVICE_ACCOUNT="data-analytics@platform-partners-pro.iam.gserviceaccount.com"
         ;;
 esac
 
@@ -100,7 +109,8 @@ echo "🚀 Iniciando Build & Deploy para Create Consolidated Tables Job"
 echo "================================================================"
 echo "🌍 AMBIENTE: ${ENVIRONMENT^^}"
 echo "📋 Configuración:"
-echo "   Proyecto: ${PROJECT_ID}"
+echo "   Proyecto Job (ejecución): ${PROJECT_ID}"
+echo "   Proyecto Datos: pph-central (solo datos, no ejecución)"
 echo "   Job Name: ${JOB_NAME}"
 echo "   Región: ${REGION}"
 echo "   Imagen: ${IMAGE_TAG}"
@@ -165,7 +175,7 @@ if gcloud run jobs describe ${JOB_NAME} --region=${REGION} --project=${PROJECT_I
         --cpu ${CPU} \
         --max-retries ${MAX_RETRIES} \
         --task-timeout ${TASK_TIMEOUT} \
-        --set-env-vars PYTHONUNBUFFERED=1"
+        --set-env-vars PYTHONUNBUFFERED=1,GCP_PROJECT=${PROJECT_ID}"
     
     # Agregar paralelismo si está configurado
     if [ "$TASKS" != "1" ]; then
@@ -185,7 +195,7 @@ else
         --cpu ${CPU} \
         --max-retries ${MAX_RETRIES} \
         --task-timeout ${TASK_TIMEOUT} \
-        --set-env-vars PYTHONUNBUFFERED=1"
+        --set-env-vars PYTHONUNBUFFERED=1,GCP_PROJECT=${PROJECT_ID}"
     
     # Agregar paralelismo si está configurado
     if [ "$TASKS" != "1" ]; then
