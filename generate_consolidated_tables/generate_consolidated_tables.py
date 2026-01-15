@@ -791,6 +791,17 @@ def create_all_consolidated_tables(create_schedules=True, start_from_letter='a',
     print(f"❌ Tablas con errores: {error_count}")
     print(f"⏭️  Tablas saltadas (sin compañías): {skipped_count}")
     print(f"📊 Total procesadas: {success_count + error_count + skipped_count}")
+    print(f"📋 Total esperado en metadatos: {len(all_tables)}")
+    
+    # Verificar si se crearon todas las tablas esperadas
+    expected_created = len(all_tables) - skipped_count  # Excluir las saltadas
+    if success_count < expected_created:
+        missing = expected_created - success_count
+        print(f"⚠️  FALTAN {missing} TABLA(S): Se esperaban {expected_created} pero se crearon {success_count}")
+        print(f"   Revisar errores arriba para identificar las tablas faltantes")
+    elif success_count == expected_created:
+        print(f"✅ TODAS LAS TABLAS ESPERADAS FUERON CREADAS ({success_count}/{expected_created})")
+    
     print(f"⏱️  Fecha fin: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
     
