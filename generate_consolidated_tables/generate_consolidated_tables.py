@@ -762,15 +762,17 @@ def create_all_consolidated_tables(create_schedules=True, start_from_letter='a',
                 success_count += 1
                 print(f"  ✅ TABLA {table_name}: CREADA EXITOSAMENTE")
                 
-                # Crear scheduled query solo si hay partition_field y está habilitado
-                if create_schedules and partition_field:
+                # Crear scheduled query si está habilitado (con o sin partition_field)
+                if create_schedules:
                     print(f"  📅 Configurando refresh automático...")
+                    if partition_field:
+                        print(f"     ✅ Con particionamiento: {partition_field}")
+                    else:
+                        print(f"     ⚠️  Sin partition_field - Tabla se recreará completa cada vez")
                     schedule_created = create_or_update_scheduled_query(table_name, companies_df, partition_field, cluster_fields)
                     if not schedule_created:
                         print(f"  ⚠️  ADVERTENCIA: No se pudo crear scheduled query para {table_name}")
-                elif not partition_field:
-                    print(f"  ⚠️  Sin partition_field - No se crea scheduled query")
-                elif not create_schedules:
+                else:
                     print(f"  ⏭️  Scheduled queries deshabilitados")
             else:
                 error_count += 1

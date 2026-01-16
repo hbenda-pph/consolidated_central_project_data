@@ -5,9 +5,9 @@ Ejecutar después de que el Job principal haya creado las tablas y schedules
 """
 
 from google.cloud import bigquery_datatransfer_v1
+from google.protobuf import field_mask_pb2
 from google.protobuf.timestamp_pb2 import Timestamp
 from datetime import datetime, timedelta
-import time
 import pytz
 
 PROJECT_CENTRAL = "pph-central"
@@ -52,29 +52,47 @@ def enable_all_scheduled_queries():
         enabled_count = 0
         error_count = 0
         
+        # Calcular tiempo de inicio (7pm Chicago)
+        # Si ya pasó hoy, programar para mañana
+        chicago_tz = pytz.timezone('America/Chicago')
+        now_chicago = datetime.now(chicago_tz)
+        target_hour = 19  # 7pm
+        
+        # Crear datetime para hoy a las 7pm
+        target_time_today = chicago_tz.localize(
+            datetime.combine(now_chicago.date(), datetime.strptime('19:00', '%H:%M').time())
+        )
+        
+        # Si ya pasó la hora de hoy, usar mañana
+        if now_chicago >= target_time_today:
+            target_time = target_time_today + timedelta(days=1)
+            print(f"⏰ Hora objetivo ya pasó hoy. Programando para mañana: {target_time.strftime('%Y-%m-%d %I:%M %p %Z')}")
+        else:
+            target_time = target_time_today
+            print(f"⏰ Programando para hoy: {target_time.strftime('%Y-%m-%d %I:%M %p %Z')}")
+        
+        # Convertir a UTC para BigQuery
+        target_time_utc = target_time.astimezone(pytz.UTC)
+        
+        # Convertir a timestamp Unix
+        start_timestamp = Timestamp()
+        start_timestamp.FromSeconds(int(target_time_utc.timestamp()))
+        
+        # Crear ScheduleOptions con start_time (común para todos)
+        schedule_options = bigquery_datatransfer_v1.ScheduleOptions(
+            start_time=start_timestamp
+        )
+        
         for config in schedules_to_enable:
             try:
-                # Establecer hoy a las 7pm Chicago
-                chicago_tz = pytz.timezone('America/Chicago')
-                today = datetime.now(chicago_tz).date()
-                target_time = chicago_tz.localize(datetime.combine(today, datetime.strptime('19:00', '%H:%M').time()))
-                
-                # Convertir a UTC para BigQuery
-                target_time_utc = target_time.astimezone(pytz.UTC)
-                
-                # Convertir a timestamp Unix
-                start_timestamp = Timestamp()
-                start_timestamp.FromSeconds(int(target_time_utc.timestamp()))
-                
-                # Crear ScheduleOptions con start_time
-                schedule_options = bigquery_datatransfer_v1.ScheduleOptions(
-                    start_time=start_timestamp
-                )
-                
+                # Actualizar configuración
                 config.disabled = False
                 config.schedule_options = schedule_options
                 
-                update_mask = {"paths": ["disabled", "schedule_options"]}
+                # Crear update_mask correctamente usando FieldMask
+                update_mask = field_mask_pb2.FieldMask()
+                update_mask.paths.append("disabled")
+                update_mask.paths.append("schedule_options")
                 
                 transfer_client.update_transfer_config(
                     transfer_config=config,
@@ -99,12 +117,6 @@ def enable_all_scheduled_queries():
         print("=" * 80)
         
         if enabled_count > 0:
-            # Mostrar hora programada
-            chicago_tz = pytz.timezone('America/Chicago')
-            today = datetime.now(chicago_tz).date()
-            target_time = chicago_tz.localize(datetime.combine(today, datetime.strptime('19:00', '%H:%M').time()))
-            target_time_utc = target_time.astimezone(pytz.UTC)
-            
             print()
             print("🎉 ¡LISTO! Todos los Scheduled Queries están ahora ACTIVOS")
             print(f"⏰ Primera ejecución (Chicago): {target_time.strftime('%Y-%m-%d %I:%M %p %Z')}")

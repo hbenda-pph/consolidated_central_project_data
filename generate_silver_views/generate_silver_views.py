@@ -459,6 +459,7 @@ def generate_silver_view_sql_from_metadata(table_name, company_result, layout_de
         source_table = table_name
     
     silver_fields = []
+    used_column_names = {}  # Rastrear nombres de columnas usadas para detectar duplicados
     
     # Procesar cada campo del layout definido en metadatos
     for field_info in layout_definition:
@@ -466,6 +467,26 @@ def generate_silver_view_sql_from_metadata(table_name, company_result, layout_de
         target_type = field_info['target_type']
         alias_name = field_info.get('alias_name', field_name)
         is_repeated = field_info.get('is_repeated', False)
+        
+        # Determinar el nombre de columna final que se usará en la vista
+        if field_name in company_field_names:
+            # Campo existe - usar alias_name
+            final_column_name = alias_name
+        else:
+            # Campo faltante - usar field_name
+            final_column_name = field_name
+        
+        # Verificar si este nombre de columna ya fue usado
+        if final_column_name in used_column_names:
+            original_field = used_column_names[final_column_name]
+            print(f"    ⚠️  ADVERTENCIA: Columna duplicada '{final_column_name}' detectada")
+            print(f"       - Primera ocurrencia: campo '{original_field}'")
+            print(f"       - Ocurrencia duplicada: campo '{field_name}'")
+            print(f"       - Se saltará la duplicada para evitar error en CREATE VIEW")
+            continue
+        
+        # Marcar este nombre como usado
+        used_column_names[final_column_name] = field_name
         
         # Verificar si el campo existe en esta compañía
         if field_name in company_field_names:
@@ -486,11 +507,11 @@ def generate_silver_view_sql_from_metadata(table_name, company_result, layout_de
                     if DEBUG_MODE:
                         print(f"    🔍 Campo {field_name}: {source_type} → {target_type}")
             
-            silver_fields.append(f"    {cast_expression} as {alias_name}")
+            silver_fields.append(f"    {cast_expression} as {final_column_name}")
         else:
             # Campo faltante - usar NULL tipado para mantener layout consistente
             default_value = get_default_value_for_type_with_cast(target_type)
-            silver_fields.append(f"    {default_value} as {field_name}")
+            silver_fields.append(f"    {default_value} as {final_column_name}")
             if DEBUG_MODE:
                 print(f"    ⚠️  Campo {field_name} faltante - usando {default_value}")
     
