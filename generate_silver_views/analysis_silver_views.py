@@ -77,12 +77,31 @@ def get_companies_info():
         print(f"❌ Error al obtener información de compañías: {str(e)}")
         raise
 
-def get_manual_table_name(table_name):
+def get_tables_from_metadata():
     """
-    Obtiene el nombre de la tabla manual agregando 's' al final
-    Por ejemplo: 'campaign' -> 'campaigns'
+    Obtiene lista de tablas desde metadata_consolidated_tables (FUENTE DE VERDAD)
+    Usa table_name exacto de los metadatos, sin modificaciones
+    
+    Returns:
+        list: Lista de nombres de tablas (table_name desde metadatos)
     """
-    return f"{table_name}s"
+    try:
+        query = f"""
+        SELECT DISTINCT table_name
+        FROM `{METADATA_TABLE}`
+        WHERE table_name IS NOT NULL
+        ORDER BY table_name
+        """
+        
+        query_job = client_central.query(query)
+        results = query_job.result()
+        tables = [row.table_name for row in results]
+        
+        return tables
+        
+    except Exception as e:
+        print(f"⚠️  Error obteniendo tablas desde metadatos: {str(e)}")
+        return []
 
 def get_table_fields_with_types(project_id, table_name, use_bronze=False):
     """
@@ -90,12 +109,19 @@ def get_table_fields_with_types(project_id, table_name, use_bronze=False):
     
     Args:
         project_id: ID del proyecto
-        table_name: Nombre de la tabla
+        table_name: Nombre de la tabla EXACTO desde metadata_consolidated_tables (FUENTE DE VERDAD)
         use_bronze: Si True, busca en dataset bronze, si False, en servicetitan_*
+    
+    IMPORTANTE: 
+    - Usa el table_name EXACTO de metadata_consolidated_tables, sin modificaciones
+    - NO hace ajustes de agregar/quitar 's' - el nombre viene de metadatos y es la fuente de verdad
+    - El endpoint es solo para ETL, no para análisis de esquemas
     """
     if use_bronze:
         dataset_name = "bronze"
-        source_table = get_manual_table_name(table_name)
+        # Usar el nombre EXACTO desde metadatos (fuente de verdad)
+        # NO modificar el nombre - si está en metadatos como "job_type", buscar "job_type"
+        source_table = table_name
     else:
         dataset_name = f"servicetitan_{project_id.replace('-', '_')}"
         source_table = table_name
@@ -205,9 +231,13 @@ def analyze_table_fields_across_companies(table_name, use_bronze=False, companie
         fields_df = get_table_fields_with_types(project_id, table_name, use_bronze)
         
         if fields_df.empty:
-            source_type = "bronze" if use_bronze else "original"
-            source_name = get_manual_table_name(table_name) if use_bronze else table_name
-            print(f"  {company_name}: Tabla {source_type} '{source_name}' no existe")
+            source_type = "bronze" if use_bronze else "fivetran"
+            # Mostrar el nombre exacto desde metadatos que se intentó buscar
+            source_name = f"'{table_name}'"
+            print(f"  {company_name}: Tabla {source_type} {source_name} no existe")
+            if DEBUG_MODE:
+                print(f"      💡 Este nombre viene de metadata_consolidated_tables.table_name")
+                print(f"      💡 Si la tabla existe con otro nombre, actualiza table_name en metadatos")
             continue
             
         # Filtrar campos de control del ETL (deben quedarse solo en Bronze)
@@ -366,7 +396,57 @@ def build_layout_definition_array(table_analysis):
     # Ordenar campos alfabéticamente (igual que en el script original)
     sorted_field_names = sorted(all_analyzed_fields)
     
-    # Construir STRUCT para cada campo
+    # Primera pasada: detectar conflictos de alias y resolverlos
+    # Mapeo de alias_name -> lista de campos que lo usan
+    alias_to_fields = {}
+    field_to_alias = {}
+    
+    for field_name in sorted_field_names:
+        field_info = first_company_fields.get(field_name, {})
+        alias_name = field_info.get('alias_name', field_name)
+        
+        if alias_name not in alias_to_fields:
+            alias_to_fields[alias_name] = []
+        alias_to_fields[alias_name].append(field_name)
+        field_to_alias[field_name] = alias_name
+    
+    # Resolver conflictos: si un alias está usado por múltiples campos
+    # Preferir el campo directo (sin punto) sobre campos nested (con punto)
+    resolved_aliases = {}
+    for alias_name, fields_list in alias_to_fields.items():
+        if len(fields_list) > 1:
+            # Hay conflicto - preferir campo directo
+            direct_fields = [f for f in fields_list if '.' not in f]
+            nested_fields = [f for f in fields_list if '.' in f]
+            
+            if direct_fields:
+                # Usar el campo directo con el alias original
+                for direct_field in direct_fields:
+                    resolved_aliases[direct_field] = alias_name
+                
+                # Para campos nested, usar alias alternativo
+                for nested_field in nested_fields:
+                    # Cambiar alias: batch.id -> batch_nested_id (en lugar de batch_id)
+                    parts = nested_field.split('.')
+                    parent_struct = parts[0]
+                    nested_field_name = parts[-1]
+                    resolved_aliases[nested_field] = f"{parent_struct}_nested_{nested_field_name}"
+                    print(f"  ⚠️  Conflicto de alias resuelto: '{nested_field}' usará alias '{resolved_aliases[nested_field]}' (conflicto con '{direct_fields[0]}' que usa '{alias_name}')")
+            else:
+                # Todos son nested - usar el primer campo con alias original
+                # y los demás con alias alternativo
+                resolved_aliases[fields_list[0]] = alias_name
+                for i, nested_field in enumerate(fields_list[1:], start=1):
+                    parts = nested_field.split('.')
+                    parent_struct = parts[0]
+                    nested_field_name = parts[-1]
+                    resolved_aliases[nested_field] = f"{parent_struct}_nested_{nested_field_name}"
+                    print(f"  ⚠️  Conflicto de alias resuelto: '{nested_field}' usará alias '{resolved_aliases[nested_field]}' (conflicto con otros campos nested)")
+        else:
+            # Sin conflicto - usar alias original
+            resolved_aliases[fields_list[0]] = alias_name
+    
+    # Segunda pasada: construir STRUCT para cada campo con alias resuelto
     for order, field_name in enumerate(sorted_field_names, start=1):
         # Determinar tipo y conflictos
         if field_name in table_analysis['type_conflicts']:
@@ -379,9 +459,9 @@ def build_layout_definition_array(table_analysis):
         # Determinar si es parcial
         is_partial = field_name in table_analysis['partial_fields']
         
-        # Obtener alias e información de repeated
+        # Obtener alias resuelto e información de repeated
         field_info = first_company_fields.get(field_name, {})
-        alias_name = field_info.get('alias_name', field_name)
+        alias_name = resolved_aliases.get(field_name, field_info.get('alias_name', field_name))
         is_repeated = field_info.get('is_repeated', False)
         
         layout_fields.append({
@@ -461,9 +541,12 @@ def generate_sample_view_ddl(table_analysis, use_bronze=False):
     company_field_names = set(company_fields.keys())
     
     # Determinar dataset fuente
+    # Usar el nombre EXACTO tal cual está en metadatos (fuente de verdad)
     if use_bronze:
         source_dataset = "bronze"
-        source_table = get_manual_table_name(table_name)
+        # Usar el nombre tal cual viene de metadatos, NO agregar 's' automáticamente
+        # El análisis ya verificó la existencia y usó el nombre correcto
+        source_table = table_name  # Usar nombre exacto de metadatos
     else:
         source_dataset = f"servicetitan_{project_id.replace('-', '_')}"
         source_table = table_name
@@ -508,9 +591,11 @@ def generate_sample_view_ddl(table_analysis, use_bronze=False):
     # Determinar el formato del dataset para el template
     # Para tablas Fivetran: servicetitan_{PROJECT_ID} (con guiones convertidos a guiones bajos)
     # Para tablas bronze: siempre "bronze"
+    # IMPORTANTE: Usar el nombre EXACTO de metadatos (fuente de verdad)
     if use_bronze:
         source_dataset_template = "bronze"
-        source_table_template = get_manual_table_name(table_name)
+        # Usar el nombre tal cual está en metadatos (no agregar 's' automáticamente)
+        source_table_template = table_name
     else:
         # El dataset de Fivetran tiene formato: servicetitan_{project_id}
         # donde project_id tiene guiones convertidos a guiones bajos
@@ -709,33 +794,15 @@ def analyze_all_tables(use_bronze=None, start_from_letter='a', specific_table=No
     
     print(f"✅ Compañías encontradas: {len(companies_df)}")
     
-    # Obtener tablas dinámicamente
-    print("\n📋 Obteniendo lista de tablas...")
-    # Si use_bronze está forzado, usar ese método
-    # Si es None, obtener desde metadatos o usar fivetran como default
-    if use_bronze is True:
-        if companies_df.empty:
-            print("❌ No hay compañías para obtener tablas")
-            return
-        project_id_for_tables = companies_df.iloc[0]['company_project_id']
-        query = f"""
-        SELECT table_name 
-        FROM `{project_id_for_tables}.bronze.INFORMATION_SCHEMA.TABLES`
-        WHERE table_name LIKE '%s'
-        ORDER BY table_name
-        """
-        try:
-            query_job = client.query(query)
-            results = query_job.result()
-            all_tables_full = [row.table_name[:-1] for row in results]
-            print(f"✅ Tablas manuales encontradas en bronze: {len(all_tables_full)}")
-        except Exception as e:
-            print(f"❌ Error obteniendo tablas de bronze: {str(e)}")
-            return
-    else:
-        # Si use_bronze es None o False, obtener desde Fivetran (default)
-        from config import get_tables_dynamically
-        all_tables_full = get_tables_dynamically()
+    # Obtener tablas desde METADATOS (FUENTE DE VERDAD)
+    print("\n📋 Obteniendo lista de tablas desde metadata_consolidated_tables...")
+    print("   💡 Usando table_name exacto de metadatos (sin modificaciones)")
+    all_tables_full = get_tables_from_metadata()
+    
+    if not all_tables_full:
+        print("⚠️  No se encontraron tablas en metadatos")
+        print("   💡 Asegúrate de que metadata_consolidated_tables tenga registros con table_name")
+        return
     
     if not all_tables_full:
         print("❌ No se encontraron tablas")
@@ -749,8 +816,19 @@ def analyze_all_tables(use_bronze=None, start_from_letter='a', specific_table=No
             all_tables = [specific_table]
             print(f"🎯 TABLA ESPECÍFICA: Analizando solo '{specific_table}'")
         else:
-            print(f"❌ ERROR: La tabla '{specific_table}' no existe")
-            return
+            # Si la tabla no está en la lista, verificar si existe en metadatos
+            # Puede estar en bronze o ser una tabla nueva
+            metadata_use_bronze = get_table_use_bronze_from_metadata(specific_table)
+            if metadata_use_bronze is not None:
+                source_type = "BRONZE" if metadata_use_bronze else "FIVETRAN"
+                print(f"⚠️  La tabla '{specific_table}' no está en la lista descubierta")
+                print(f"   ✅ Pero existe en metadatos (fuente: {source_type})")
+                print(f"   Continuando con análisis directo desde metadatos...")
+            else:
+                print(f"⚠️  ADVERTENCIA: La tabla '{specific_table}' no está en la lista descubierta")
+                print(f"   Continuando con análisis directo...")
+                print(f"   (La tabla puede ser nueva o estar en un dataset diferente)")
+            all_tables = [specific_table]
     else:
         all_tables = [t for t in all_tables_full if t >= start_from_letter]
         if start_from_letter != 'a':
