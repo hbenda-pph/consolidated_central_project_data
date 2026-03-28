@@ -469,12 +469,9 @@ def generate_silver_view_sql_from_metadata(table_name, company_result, layout_de
         is_repeated = field_info.get('is_repeated', False)
         
         # Determinar el nombre de columna final que se usará en la vista
-        if field_name in company_field_names:
-            # Campo existe - usar alias_name
-            final_column_name = alias_name
-        else:
-            # Campo faltante - usar field_name
-            final_column_name = field_name
+        # SIEMPRE usar alias_name. Si falta un campo aplanado (ej. address.city),
+        # usar field_name como alias generaría un error de sintaxis en BigQuery.
+        final_column_name = alias_name
         
         # Verificar si este nombre de columna ya fue usado
         if final_column_name in used_column_names:
@@ -679,7 +676,9 @@ def generate_silver_view_sql(table_analysis, company_result, use_bronze=False):
         
         # CRÍTICO: Usar CAST(NULL AS tipo) para mantener compatibilidad con UNION ALL
         default_value = get_default_value_for_type_with_cast(target_type)
-        silver_fields.append(f"    {default_value} as {field_name}")
+        # Si el campo falta y tiene un '.', usar '_' para crear un alias válido
+        alias = str(field_name).replace('.', '_')
+        silver_fields.append(f"    {default_value} as {alias}")
     
     # Crear SQL
     view_name = f"vw_{table_name}"
