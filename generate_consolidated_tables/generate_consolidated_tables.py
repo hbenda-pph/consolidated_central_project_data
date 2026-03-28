@@ -575,7 +575,7 @@ def create_or_update_scheduled_query(table_name, companies_df, partition_field, 
     else:
         partition_sql = ""
     
-    cluster_sql = f"CLUSTER BY ({', '.join(cluster_fields)})" if cluster_fields else ""
+    cluster_sql = f"CLUSTER BY {', '.join(cluster_fields)}" if cluster_fields else ""
     
     refresh_sql = f"""
 /*
