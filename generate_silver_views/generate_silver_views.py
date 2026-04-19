@@ -103,7 +103,8 @@ def get_table_metadata_from_metadata_table(table_name):
         SELECT
             silver_layout_definition,
             silver_use_bronze,
-            silver_status
+            silver_status,
+            silver_view_ddl
         FROM `{METADATA_TABLE}`
         WHERE table_name = '{table_name}'
         LIMIT 1
@@ -118,27 +119,31 @@ def get_table_metadata_from_metadata_table(table_name):
                 print(f"  ⚠️  Tabla '{table_name}' no encontrada en metadatos")
             return None
         
-        # Verificar que tiene layout definido
-        if row.silver_layout_definition is None or len(row.silver_layout_definition) == 0:
+        has_layout = row.silver_layout_definition is not None and len(row.silver_layout_definition) > 0
+        has_ddl = getattr(row, 'silver_view_ddl', None) is not None
+        
+        # Verificar que tiene layout definido o ddl definido
+        if not has_layout and not has_ddl:
             if DEBUG_MODE:
-                print(f"  ⚠️  Tabla '{table_name}' no tiene layout definido en metadatos")
+                print(f"  ⚠️  Tabla '{table_name}' no tiene layout ni DDL definido en metadatos")
             return None
         
         # Convertir ARRAY<STRUCT> a lista de diccionarios
         layout_list = []
-        for field_struct in row.silver_layout_definition:
-            layout_list.append({
-                'field_name': field_struct.get('field_name'),
-                'target_type': field_struct.get('target_type'),
-                'field_order': field_struct.get('field_order'),
-                'has_type_conflict': field_struct.get('has_type_conflict', False),
-                'is_partial': field_struct.get('is_partial', False),
-                'alias_name': field_struct.get('alias_name'),
-                'is_repeated': field_struct.get('is_repeated', False)
-            })
-        
-        # Ordenar por field_order
-        layout_list.sort(key=lambda x: x['field_order'])
+        if has_layout:
+            for field_struct in row.silver_layout_definition:
+                layout_list.append({
+                    'field_name': field_struct.get('field_name'),
+                    'target_type': field_struct.get('target_type'),
+                    'field_order': field_struct.get('field_order'),
+                    'has_type_conflict': field_struct.get('has_type_conflict', False),
+                    'is_partial': field_struct.get('is_partial', False),
+                    'alias_name': field_struct.get('alias_name'),
+                    'is_repeated': field_struct.get('is_repeated', False)
+                })
+            
+            # Ordenar por field_order
+            layout_list.sort(key=lambda x: x['field_order'])
         
         use_bronze = bool(row.silver_use_bronze) if row.silver_use_bronze is not None else False
         
@@ -146,7 +151,8 @@ def get_table_metadata_from_metadata_table(table_name):
             'layout_definition': layout_list,
             'use_bronze': use_bronze,
             'exists': True,
-            'status': row.silver_status
+            'status': row.silver_status,
+            'silver_view_ddl': getattr(row, 'silver_view_ddl', None)
         }
         
     except Exception as e:
@@ -849,7 +855,7 @@ def get_default_value_for_type_with_cast(data_type):
     }
     return defaults.get(data_type, 'NULL')
 
-def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_table=None, use_bronze=None, specific_company_id=None, debug=False, use_metadata=True):
+def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_table=None, use_bronze=None, specific_company_id=None, debug=False, use_metadata=True, use_ddl=False):
     """
     Genera vistas Silver para todas las tablas o una específica
     
@@ -861,6 +867,7 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
         specific_company_id (int): Si se proporciona, procesa solo esta compañía
         debug (bool): Si True, muestra mensajes de debug detallados
         use_metadata (bool): Si True, usa metadata_consolidated_tables como fuente de verdad (default: True)
+        use_ddl (bool): Si True, usa el campo silver_view_ddl en lugar de construir la vista por medio de los iterables
     
     Returns:
         tuple: (all_results, output_dir)
@@ -1032,14 +1039,29 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
                     )
                 continue
             
-            layout_definition = metadata_info['layout_definition']
+            layout_definition = metadata_info.get('layout_definition', [])
             table_use_bronze = metadata_info['use_bronze']
+            silver_view_ddl = metadata_info.get('silver_view_ddl')
             
             # Si use_bronze fue especificado explícitamente, usarlo; si no, usar el de metadatos
             if use_bronze is not None:
                 table_use_bronze = use_bronze
             
-            print(f"  📋 Layout obtenido desde metadatos: {len(layout_definition)} campos")
+            if use_ddl and not silver_view_ddl:
+                print(f"  ⚠️  Tabla '{table_name}' no tiene DDL definido en metadatos, se saltará")
+                for _, company in companies_df.iterrows():
+                    tracking_manager.update_status(
+                        company_id=company['company_id'],
+                        table_name=table_name,
+                        status=0,
+                        notes="Tabla no tiene DDL en metadatos"
+                    )
+                continue
+            
+            if not use_ddl:
+                print(f"  📋 Layout obtenido desde metadatos: {len(layout_definition)} campos")
+            else:
+                print(f"  📝 Usando DDL de metadatos")
             print(f"  📦 Fuente: {'BRONZE' if table_use_bronze else 'FIVETRAN'}")
             
             # Obtener campos de cada compañía para aplicar casts correctos
@@ -1049,36 +1071,45 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
                 if project_id is None:
                     continue
                 
-                # Obtener campos de la tabla en esta compañía
-                try:
-                    fields_df = get_table_fields_with_types(project_id, table_name, table_use_bronze)
-                    
-                    # Validar que el DataFrame tenga las columnas necesarias
-                    if not fields_df.empty and 'column_name' in fields_df.columns:
-                        # Filtrar campos de control del ETL
-                        filtered_fields_df = fields_df[~fields_df['column_name'].str.startswith('_')]
+                if use_ddl:
+                    # En modo DDL no necesitamos leer el esquema de Information Schema
+                    company_results.append({
+                        'company_id': company['company_id'],
+                        'company_name': company['company_name'],
+                        'project_id': project_id,
+                        'fields_df': None
+                    })
+                else:
+                    # Obtener campos de la tabla en esta compañía
+                    try:
+                        fields_df = get_table_fields_with_types(project_id, table_name, table_use_bronze)
                         
-                        # Validar nuevamente después del filtro
-                        if not filtered_fields_df.empty:
-                            company_results.append({
-                                'company_id': company['company_id'],
-                                'company_name': company['company_name'],
-                                'project_id': project_id,
-                                'fields_df': filtered_fields_df
-                            })
+                        # Validar que el DataFrame tenga las columnas necesarias
+                        if not fields_df.empty and 'column_name' in fields_df.columns:
+                            # Filtrar campos de control del ETL
+                            filtered_fields_df = fields_df[~fields_df['column_name'].str.startswith('_')]
+                            
+                            # Validar nuevamente después del filtro
+                            if not filtered_fields_df.empty:
+                                company_results.append({
+                                    'company_id': company['company_id'],
+                                    'company_name': company['company_name'],
+                                    'project_id': project_id,
+                                    'fields_df': filtered_fields_df
+                                })
+                            else:
+                                print(f"    ⚠️  {company['company_name']}: No hay campos válidos después de filtrar campos de control")
+                        elif fields_df.empty:
+                            print(f"    ⚠️  {company['company_name']}: DataFrame vacío para {table_name}")
                         else:
-                            print(f"    ⚠️  {company['company_name']}: No hay campos válidos después de filtrar campos de control")
-                    elif fields_df.empty:
-                        print(f"    ⚠️  {company['company_name']}: DataFrame vacío para {table_name}")
-                    else:
-                        print(f"    ⚠️  {company['company_name']}: DataFrame no tiene columna 'column_name'")
-                        print(f"    📋 Columnas disponibles: {list(fields_df.columns)}")
-                except Exception as e:
-                    print(f"    ❌ Error obteniendo campos para {company['company_name']} - {table_name}: {str(e)}")
-                    import traceback
-                    if DEBUG_MODE:
-                        traceback.print_exc()
-                    continue
+                            print(f"    ⚠️  {company['company_name']}: DataFrame no tiene columna 'column_name'")
+                            print(f"    📋 Columnas disponibles: {list(fields_df.columns)}")
+                    except Exception as e:
+                        print(f"    ❌ Error obteniendo campos para {company['company_name']} - {table_name}: {str(e)}")
+                        import traceback
+                        if DEBUG_MODE:
+                            traceback.print_exc()
+                        continue
             
             if not company_results:
                 print(f"  ⏭️  Saltando tabla '{table_name}' - no se encontraron datos en ninguna compañía")
@@ -1093,18 +1124,25 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
             
             company_sql_files = []
             
-            # Procesar cada compañía usando el layout de metadatos
             for company_result in company_results:
                 company_name = company_result['company_name']
                 project_id = company_result['project_id']
                 
-                # Generar SQL usando layout de metadatos
-                sql_content = generate_silver_view_sql_from_metadata(
-                    table_name, 
-                    company_result, 
-                    layout_definition, 
-                    table_use_bronze
-                )
+                sql_content = None
+                
+                if use_ddl and silver_view_ddl:
+                    project_id_underscore = project_id.replace('-', '_')
+                    sql_content = silver_view_ddl
+                    sql_content = sql_content.replace(f"servicetitan_<PROJECT_ID>", f"servicetitan_{project_id_underscore}")
+                    sql_content = sql_content.replace("<PROJECT_ID>", project_id)
+                else:
+                    # Generar SQL usando layout de metadatos
+                    sql_content = generate_silver_view_sql_from_metadata(
+                        table_name, 
+                        company_result, 
+                        layout_definition, 
+                        table_use_bronze
+                    )
                 
                 # Validar que se generó SQL válido
                 if sql_content is None:
@@ -1340,6 +1378,8 @@ if __name__ == "__main__":
         help='Forzar uso de tablas Fivetran. Si no se especifica, se lee desde metadatos')
     parser.add_argument('--no-metadata', action='store_true',
         help='Usar análisis dinámico en lugar de metadata_consolidated_tables (modo fallback)')
+    parser.add_argument('--use-ddl', action='store_true',
+        help='Usar el DDL directamente del campo silver_view_ddl en metadata_consolidated_tables en lugar del esquema campo por campo')
     parser.add_argument('--debug', '-d', action='store_true',
         help='Activar modo debug: muestra mensajes detallados de procesamiento y SQL generado')
     
@@ -1368,9 +1408,9 @@ if __name__ == "__main__":
         use_bronze=use_bronze,
         specific_company_id=args.company_id,
         debug=args.debug,
-        use_metadata=not args.no_metadata
+        use_metadata=not args.no_metadata,
+        use_ddl=args.use_ddl
     )
     
     print(f"\n✅ Proceso completado exitosamente!")
     print(f"📁 Archivos generados en: {output_dir}")
-
