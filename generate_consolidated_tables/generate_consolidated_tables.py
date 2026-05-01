@@ -26,7 +26,11 @@ client = bigquery.Client(project=PROJECT_CENTRAL)
 transfer_client = bigquery_datatransfer_v1.DataTransferServiceClient()
 
 def get_metadata_dict():
-    """Obtiene metadatos de particionamiento, clusterizado y layout de Silver"""
+    """Obtiene metadatos de particionamiento, clusterizado y layout de Silver.
+    
+    Lee los mismos campos STRUCT que generate_silver_views.py para garantizar
+    que alias_name, is_repeated y field_order se resuelvan igual en ambos scripts.
+    """
     query = f"""
         SELECT 
             table_name,
@@ -34,71 +38,71 @@ def get_metadata_dict():
             cluster_fields,
             silver_layout_definition
         FROM `{PROJECT_CENTRAL}.{DATASET_MANAGEMENT}.metadata_consolidated_tables`
+        WHERE silver_status = 'completed'
+          AND silver_layout_definition IS NOT NULL
+          AND ARRAY_LENGTH(silver_layout_definition) > 0
         ORDER BY table_name
     """
     
-    print(f"📋 Cargando metadatos desde: {PROJECT_CENTRAL}.{DATASET_MANAGEMENT}.metadata_consolidated_tables")
+    print(f"\ud83d\udccb Cargando metadatos desde: {PROJECT_CENTRAL}.{DATASET_MANAGEMENT}.metadata_consolidated_tables")
     
     try:
         query_job = client.query(query)
         results = query_job.result()
         
-        # Convertir resultados a lista de dicts
-        rows_list = []
-        for row in results:
-            rows_list.append({
-                'table_name': row.table_name,
-                'partition_fields': row.partition_fields,
-                'cluster_fields': row.cluster_fields,
-                'silver_layout_definition': row.silver_layout_definition
-            })
-        
-        df = pd.DataFrame(rows_list)
-        
-        print(f"🔍 DEBUG: Filas obtenidas de metadatos: {len(df)}")
-        
-        if len(df) > 0:
-            print(f"📋 Primeras 5 tablas en metadatos:")
-            for i, row in df.head(5).iterrows():
-                print(f"   - {row['table_name']}: partition={row['partition_fields']}, cluster={row['cluster_fields']}")
-        
         metadata_dict = {}
-        for _, row in df.iterrows():
-            # Convertir ARRAY<STRUCT> a lista de diccionarios si existe
+        count = 0
+        for row in results:
+            count += 1
+            # Convertir ARRAY<STRUCT> a lista de diccionarios.
+            # IMPORTANTE: leer los mismos campos que generate_silver_views.py,
+            # especialmente alias_name (campos aplanados de STRUCTs usan alias en lugar de field_name con '.')
             layout_list = []
-            if row['silver_layout_definition']:
-                for field_struct in row['silver_layout_definition']:
+            if row.silver_layout_definition:
+                for field_struct in row.silver_layout_definition:
                     layout_list.append({
-                        'field_name': field_struct.get('field_name'),
-                        'target_type': field_struct.get('target_type'),
-                        'field_order': field_struct.get('field_order')
+                        'field_name':        field_struct.get('field_name'),
+                        'target_type':       field_struct.get('target_type'),
+                        'field_order':       field_struct.get('field_order'),
+                        'alias_name':        field_struct.get('alias_name'),        # columna expuesta en la vista
+                        'is_repeated':       field_struct.get('is_repeated', False),
+                        'is_partial':        field_struct.get('is_partial', False),
+                        'has_type_conflict': field_struct.get('has_type_conflict', False),
                     })
+                # Ordenar explicitamente por field_order (igual que generate_silver_views.py ln.146)
+                layout_list.sort(key=lambda x: (x['field_order'] or 0))
             
-            metadata_dict[row['table_name']] = {
-                'partition_fields': row['partition_fields'],
-                'cluster_fields': row['cluster_fields'],
+            metadata_dict[row.table_name] = {
+                'partition_fields':        row.partition_fields,
+                'cluster_fields':          row.cluster_fields,
                 'silver_layout_definition': layout_list
             }
         
-        print(f"✅ Metadatos cargados: {len(metadata_dict)} tablas")
-        print(f"📋 Tablas en diccionario: {list(metadata_dict.keys())[:10]}")
+        print(f"\u2705 Metadatos cargados: {count} tablas (silver_status=completed)")
+        if count > 0:
+            sample = list(metadata_dict.keys())[:5]
+            print(f"\ud83d\udccb Muestra de tablas: {sample}")
         return metadata_dict
+
     except Exception as e:
-        print(f"⚠️  Error cargando metadatos: {str(e)}")
+        print(f"\u26a0\ufe0f  Error cargando metadatos: {str(e)}")
         import traceback
         traceback.print_exc()
-        print("   Usando configuración por defecto para todas las tablas")
+        print("   Usando configuraci\u00f3n por defecto para todas las tablas")
         return {}
 
 def get_available_tables():
     """
-    Obtiene lista de tablas desde METADATOS (no desde vistas Silver)
-    Los metadatos son la GUÍA del proceso
+    Obtiene lista de tablas desde METADATOS (no desde vistas Silver).
+    Filtra igual que generate_silver_views.py: solo tablas con silver_status='completed'
+    y con layout definido (ARRAY no vacío).
     """
     query = f"""
         SELECT table_name
         FROM `{PROJECT_CENTRAL}.{DATASET_MANAGEMENT}.metadata_consolidated_tables`
-        WHERE table_name IS NOT NULL
+        WHERE silver_layout_definition IS NOT NULL
+          AND ARRAY_LENGTH(silver_layout_definition) > 0
+          AND silver_status = 'completed'
         ORDER BY table_name
     """
     
@@ -107,11 +111,11 @@ def get_available_tables():
         results = query_job.result()
         tables = [row.table_name for row in results]
         
-        print(f"✅ Tablas desde metadatos: {len(tables)}")
+        print(f"\u2705 Tablas desde metadatos (silver_status=completed): {len(tables)}")
         return tables
         
     except Exception as e:
-        print(f"❌ Error obteniendo tablas desde metadatos: {str(e)}")
+        print(f"\u274c Error obteniendo tablas desde metadatos: {str(e)}")
         import traceback
         traceback.print_exc()
         return []
@@ -193,6 +197,33 @@ def verify_field_exists(table_name, field_name, company_project_id):
         return len(list(result)) > 0
     except Exception:
         return False
+
+def build_select_fields_from_layout(silver_layout_definition):
+    """
+    Construye la lista explícita de campos SELECT desde silver_layout_definition.
+    Usa alias_name si está disponible, si no usa field_name.
+    El layout ya viene ordenado por field_order desde get_metadata_dict().
+
+    Returns:
+        str: Fragmento SQL con los campos del SELECT separados por coma y salto de línea,
+             o None si el layout está vacío (para que el llamador use SELECT *)
+    """
+    if not silver_layout_definition:
+        return None
+
+    field_lines = []
+    seen = set()
+    for field_info in silver_layout_definition:
+        col = field_info.get('alias_name') or field_info.get('field_name')
+        if not col or col in seen:
+            continue
+        seen.add(col)
+        field_lines.append(f'          `{col}`')
+
+    if not field_lines:
+        return None
+
+    return ',\n'.join(field_lines)
 
 def validate_silver_view_schemas(table_name, companies_df):
     """
@@ -468,13 +499,29 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
         print(f"  💡 Ejecuta 'generate_silver_views.py' para regenerar vistas con layouts consistentes")
         # Continuar de todas formas - puede que funcione si las diferencias son menores
     
-    # Construir UNION ALL con metadata de compañía
-    # NOTA: Usamos SELECT * porque las vistas Silver ya tienen campos en orden consistente
-    # (ordenados por field_order del layout en metadata_consolidated_tables)
+    # Construir UNION ALL con metadata de compañía.
+    # Usamos lista explícita de campos desde silver_layout_definition para que el UNION ALL
+    # sea siempre compatible independientemente de cómo se generó cada vista Silver.
+    # Si no hay layout definido, se cae a SELECT * como fallback.
+    explicit_fields_sql = build_select_fields_from_layout(silver_layout_definition)
+
+    if explicit_fields_sql:
+        print(f"  📋 SELECT explícito: {len(silver_layout_definition)} campos desde layout")
+    else:
+        print(f"  ⚠️  Sin layout definido, usando SELECT * (posible fuente de incompatibilidad)")
+
     union_parts = []
     for _, company in companies_df.iterrows():
-        union_part = f"""
-        SELECT 
+        if explicit_fields_sql:
+            union_part = f"""
+        SELECT
+          '{company['company_project_id']}' AS company_project_id,
+          {company['company_id']} AS company_id,
+{explicit_fields_sql}
+        FROM `{company['company_project_id']}.{DATASET_SILVER}.vw_{table_name}`"""
+        else:
+            union_part = f"""
+        SELECT
           '{company['company_project_id']}' AS company_project_id,
           {company['company_id']} AS company_id,
           *
@@ -543,7 +590,7 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
         
         return False, None, []
 
-def create_or_update_scheduled_query(table_name, companies_df, partition_field, cluster_fields):
+def create_or_update_scheduled_query(table_name, companies_df, partition_field, cluster_fields, metadata_dict=None):
     """
     Crea o actualiza un Scheduled Query para refresh diario de la tabla consolidada
     
@@ -551,6 +598,10 @@ def create_or_update_scheduled_query(table_name, companies_df, partition_field, 
     Para que funcione completamente, se requiere:
     1. Habilitar BigQuery Data Transfer API
     2. Permisos del Service Account en todos los proyectos de compañías
+
+    Args:
+        metadata_dict: Diccionario de metadatos para obtener el layout de campos.
+                       Si se proporciona, el SELECT usará campos explícitos en lugar de SELECT *.
     """
     display_name = f"sq_consolidated_{table_name}"
     
@@ -558,17 +609,30 @@ def create_or_update_scheduled_query(table_name, companies_df, partition_field, 
     # Clave compuesta: company_project_id + id (único en tabla consolidada)
     # Sin filtro temporal - procesa TODAS las vistas para capturar cualquier actualización
     
+    # Obtener layout para campos explícitos (mismo mecanismo que create_consolidated_table)
+    explicit_fields_sql = None
+    if metadata_dict and table_name in metadata_dict:
+        layout = metadata_dict[table_name].get('silver_layout_definition')
+        explicit_fields_sql = build_select_fields_from_layout(layout)
+
     union_parts = []
     for _, company in companies_df.iterrows():
-        union_part = f"""
-        SELECT 
+        if explicit_fields_sql:
+            union_part = f"""
+        SELECT
+          '{company['company_project_id']}' AS company_project_id,
+          {company['company_id']} AS company_id,
+{explicit_fields_sql}
+        FROM `{company['company_project_id']}.{DATASET_SILVER}.vw_{table_name}`"""
+        else:
+            union_part = f"""
+        SELECT
           '{company['company_project_id']}' AS company_project_id,
           {company['company_id']} AS company_id,
           *
         FROM `{company['company_project_id']}.{DATASET_SILVER}.vw_{table_name}`"""
         union_parts.append(union_part)
-    
-    
+
     # Lógica genérica para todas las tablas (las vistas Silver ya tienen campos aplanados)
     if partition_field:
         partition_sql = f"PARTITION BY DATE_TRUNC({partition_field}, MONTH)"
@@ -769,7 +833,7 @@ def create_all_consolidated_tables(create_schedules=True, start_from_letter='a',
                         print(f"     ✅ Con particionamiento: {partition_field}")
                     else:
                         print(f"     ⚠️  Sin partition_field - Tabla se recreará completa cada vez")
-                    schedule_created = create_or_update_scheduled_query(table_name, companies_df, partition_field, cluster_fields)
+                    schedule_created = create_or_update_scheduled_query(table_name, companies_df, partition_field, cluster_fields, metadata_dict=metadata_dict)
                     if not schedule_created:
                         print(f"  ⚠️  ADVERTENCIA: No se pudo crear scheduled query para {table_name}")
                 else:
