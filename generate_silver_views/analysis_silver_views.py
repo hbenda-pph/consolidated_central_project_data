@@ -370,9 +370,27 @@ def determine_consensus_type(types, type_info_list):
     # SI HAY CUALQUIER DIFERENCIA → STRING
     return 'STRING'
 
+def is_complex_type(data_type):
+    """
+    Detecta si un tipo de dato es complejo (ARRAY, STRUCT, RECORD, JSON).
+    INFORMATION_SCHEMA devuelve tipos completos como 'ARRAY<STRUCT<name STRING, id INT64>>',
+    no strings simples como 'ARRAY', por lo que se usa startswith.
+    """
+    if data_type is None:
+        return False
+    t = str(data_type).strip().upper()
+    return t.startswith('ARRAY') or t.startswith('STRUCT') or t.startswith('RECORD') or t == 'JSON'
+
 def build_layout_definition_array(table_analysis):
     """
     Construye el ARRAY<STRUCT> para silver_layout_definition
+    
+    Correcciones aplicadas:
+    - is_repeated se agrega desde TODAS las compañías (no solo la primera),
+      para que campos parciales de tipo ARRAY queden correctamente marcados.
+    - field_order se basa en la mediana de ordinal_position de INFORMATION_SCHEMA
+      en lugar de orden puramente alfabético, reflejando mejor el orden real de BigQuery.
+    - alias_name se toma de la primera compañía que tenga el campo.
     
     Returns:
         list: Lista de diccionarios con estructura del STRUCT
@@ -382,73 +400,80 @@ def build_layout_definition_array(table_analysis):
     # Obtener todos los campos analizados (comunes y parciales)
     all_analyzed_fields = set(table_analysis['field_consensus'].keys()) | set(table_analysis['type_conflicts'].keys())
     
-    # Obtener información de aliases desde la primera compañía (todas deberían tener la misma estructura)
-    first_company_fields = {}
-    if table_analysis['company_results']:
-        first_company_result = table_analysis['company_results'][0]
-        for _, row in first_company_result['fields_df'].iterrows():
-            field_name = row['column_name']
-            first_company_fields[field_name] = {
-                'alias_name': row.get('alias_name', field_name),
-                'is_repeated': row.get('is_repeated_record', False)
-            }
+    # FIX #2: Agregar info de alias, is_repeated y ordinal_position desde TODAS las compañías.
+    # Un campo es REPEATED si lo es en AL MENOS UNA compañía.
+    # El alias_name y ordinal_position se toman de la primera compañía que tenga el campo.
+    all_company_fields = {}  # field_name -> {'alias_name', 'is_repeated', 'ordinal_positions': []}
     
-    # Ordenar campos alfabéticamente (igual que en el script original)
-    sorted_field_names = sorted(all_analyzed_fields)
+    for company_result in table_analysis['company_results']:
+        for _, row in company_result['fields_df'].iterrows():
+            field_name = row['column_name']
+            is_rep = bool(row.get('is_repeated_record', False))
+            alias = row.get('alias_name', field_name)
+            ordinal = row.get('ordinal_position', None)
+            
+            if field_name not in all_company_fields:
+                all_company_fields[field_name] = {
+                    'alias_name': alias,
+                    'is_repeated': is_rep,
+                    'ordinal_positions': [ordinal] if ordinal is not None else []
+                }
+            else:
+                # Si alguna compañía lo marca como REPEATED, el layout también lo marca
+                if is_rep:
+                    all_company_fields[field_name]['is_repeated'] = True
+                if ordinal is not None:
+                    all_company_fields[field_name]['ordinal_positions'].append(ordinal)
+    
+    # FIX #5: Ordenar campos por ordinal_position mediana (consenso entre compañías),
+    # con fallback a orden alfabético para campos sin posición.
+    def field_sort_key(field_name):
+        info = all_company_fields.get(field_name, {})
+        positions = info.get('ordinal_positions', [])
+        if positions:
+            return (0, sorted(positions)[len(positions) // 2])  # mediana
+        return (1, field_name)  # sin posición -> al final, alfabético
+    
+    sorted_field_names = sorted(all_analyzed_fields, key=field_sort_key)
     
     # Primera pasada: detectar conflictos de alias y resolverlos
     # Mapeo de alias_name -> lista de campos que lo usan
     alias_to_fields = {}
-    field_to_alias = {}
     
     for field_name in sorted_field_names:
-        field_info = first_company_fields.get(field_name, {})
+        field_info = all_company_fields.get(field_name, {})
         alias_name = field_info.get('alias_name', field_name)
         
         if alias_name not in alias_to_fields:
             alias_to_fields[alias_name] = []
         alias_to_fields[alias_name].append(field_name)
-        field_to_alias[field_name] = alias_name
     
     # Resolver conflictos: si un alias está usado por múltiples campos
     # Preferir el campo directo (sin punto) sobre campos nested (con punto)
     resolved_aliases = {}
     for alias_name, fields_list in alias_to_fields.items():
         if len(fields_list) > 1:
-            # Hay conflicto - preferir campo directo
             direct_fields = [f for f in fields_list if '.' not in f]
             nested_fields = [f for f in fields_list if '.' in f]
             
             if direct_fields:
-                # Usar el campo directo con el alias original
                 for direct_field in direct_fields:
                     resolved_aliases[direct_field] = alias_name
-                
-                # Para campos nested, usar alias alternativo
                 for nested_field in nested_fields:
-                    # Cambiar alias: batch.id -> batch_nested_id (en lugar de batch_id)
                     parts = nested_field.split('.')
-                    parent_struct = parts[0]
-                    nested_field_name = parts[-1]
-                    resolved_aliases[nested_field] = f"{parent_struct}_nested_{nested_field_name}"
-                    print(f"  ⚠️  Conflicto de alias resuelto: '{nested_field}' usará alias '{resolved_aliases[nested_field]}' (conflicto con '{direct_fields[0]}' que usa '{alias_name}')")
+                    resolved_aliases[nested_field] = f"{parts[0]}_nested_{parts[-1]}"
+                    print(f"  ⚠️  Conflicto de alias resuelto: '{nested_field}' → '{resolved_aliases[nested_field]}'")
             else:
-                # Todos son nested - usar el primer campo con alias original
-                # y los demás con alias alternativo
                 resolved_aliases[fields_list[0]] = alias_name
-                for i, nested_field in enumerate(fields_list[1:], start=1):
+                for nested_field in fields_list[1:]:
                     parts = nested_field.split('.')
-                    parent_struct = parts[0]
-                    nested_field_name = parts[-1]
-                    resolved_aliases[nested_field] = f"{parent_struct}_nested_{nested_field_name}"
-                    print(f"  ⚠️  Conflicto de alias resuelto: '{nested_field}' usará alias '{resolved_aliases[nested_field]}' (conflicto con otros campos nested)")
+                    resolved_aliases[nested_field] = f"{parts[0]}_nested_{parts[-1]}"
+                    print(f"  ⚠️  Conflicto de alias resuelto: '{nested_field}' → '{resolved_aliases[nested_field]}'")
         else:
-            # Sin conflicto - usar alias original
             resolved_aliases[fields_list[0]] = alias_name
     
     # Segunda pasada: construir STRUCT para cada campo con alias resuelto
     for order, field_name in enumerate(sorted_field_names, start=1):
-        # Determinar tipo y conflictos
         if field_name in table_analysis['type_conflicts']:
             target_type = table_analysis['type_conflicts'][field_name]['consensus_type']
             has_conflict = True
@@ -456,11 +481,9 @@ def build_layout_definition_array(table_analysis):
             target_type = table_analysis['field_consensus'][field_name]['type']
             has_conflict = False
         
-        # Determinar si es parcial
         is_partial = field_name in table_analysis['partial_fields']
         
-        # Obtener alias resuelto e información de repeated
-        field_info = first_company_fields.get(field_name, {})
+        field_info = all_company_fields.get(field_name, {})
         alias_name = resolved_aliases.get(field_name, field_info.get('alias_name', field_name))
         is_repeated = field_info.get('is_repeated', False)
         
@@ -477,15 +500,19 @@ def build_layout_definition_array(table_analysis):
     return layout_fields
 
 def generate_cast_for_field(field_name, source_type, target_type):
-    """Genera la expresión CAST apropiada para un campo"""
+    """
+    Genera la expresión CAST apropiada para un campo.
+    FIX #3: Usa is_complex_type() con startswith en lugar de match exacto,
+    porque INFORMATION_SCHEMA devuelve 'ARRAY<STRUCT<name STRING, id INT64>>'
+    no el string simple 'ARRAY'.
+    """
     if source_type == target_type:
         return field_name
     
     if target_type == 'STRING':
-        if source_type == 'JSON':
-            return f"COALESCE(TO_JSON_STRING({field_name}), '')"
-        elif source_type in ['STRUCT', 'ARRAY', 'RECORD']:
-            return f"COALESCE(TO_JSON_STRING({field_name}), '')"
+        # FIX #3: is_complex_type cubre ARRAY<STRUCT<...>>, STRUCT<...>, RECORD, JSON
+        if is_complex_type(source_type):
+            return f"TO_JSON_STRING({field_name})"
         else:
             return f"CAST({field_name} AS STRING)"
     
@@ -567,7 +594,12 @@ def generate_sample_view_ddl(table_analysis, use_bronze=False):
             # Campo existe en esta compañía
             source_type = company_fields.get(field_name)
             
-            if is_repeated:
+            # FIX #4: Usar TO_JSON_STRING si el layout lo marca como REPEATED
+            # O si el tipo real de INFORMATION_SCHEMA es ARRAY/STRUCT/RECORD/JSON
+            # (cubre casos donde el metadata no refleja el tipo real de la compañía)
+            source_is_complex = is_complex_type(source_type)
+            
+            if is_repeated or source_is_complex:
                 cast_expression = f"TO_JSON_STRING({field_name})"
             else:
                 if source_type == target_type:
@@ -803,10 +835,7 @@ def analyze_all_tables(use_bronze=None, start_from_letter='a', specific_table=No
         print("⚠️  No se encontraron tablas en metadatos")
         print("   💡 Asegúrate de que metadata_consolidated_tables tenga registros con table_name")
         return
-    
-    if not all_tables_full:
-        print("❌ No se encontraron tablas")
-        return
+    # FIX #1: Eliminada verificación duplicada de lista vacía (era código muerto)
     
     print(f"✅ Tablas encontradas: {len(all_tables_full)}")
     
