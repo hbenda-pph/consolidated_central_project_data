@@ -1098,9 +1098,25 @@ def generate_all_silver_views(force_mode=True, start_from_letter='a', specific_t
                                     'fields_df': filtered_fields_df
                                 })
                             else:
-                                print(f"    ⚠️  {company['company_name']}: No hay campos válidos después de filtrar campos de control")
+                                # Sin campos válidos tras filtrar ETL-control: incluir con fields_df=None
+                                # para que se genere la vista con NULLs tipados del layout
+                                print(f"    ⚠️  {company['company_name']}: No hay campos válidos después de filtrar campos de control - se creará vista con NULLs")
+                                company_results.append({
+                                    'company_id': company['company_id'],
+                                    'company_name': company['company_name'],
+                                    'project_id': project_id,
+                                    'fields_df': None
+                                })
                         elif fields_df.empty:
-                            print(f"    ⚠️  {company['company_name']}: DataFrame vacío para {table_name}")
+                            # Tabla no existe en esta compañía: incluir con fields_df=None
+                            # para que se genere la vista con NULLs tipados del layout (modo metadata)
+                            print(f"    ⚠️  {company['company_name']}: Tabla '{table_name}' no encontrada en INFORMATION_SCHEMA - se creará vista con NULLs tipados del layout")
+                            company_results.append({
+                                'company_id': company['company_id'],
+                                'company_name': company['company_name'],
+                                'project_id': project_id,
+                                'fields_df': None
+                            })
                         else:
                             print(f"    ⚠️  {company['company_name']}: DataFrame no tiene columna 'column_name'")
                             print(f"    📋 Columnas disponibles: {list(fields_df.columns)}")
