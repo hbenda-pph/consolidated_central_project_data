@@ -717,15 +717,16 @@ AS
         print(f"     Tabla creada OK - Scheduled Query se puede crear manualmente después")
         return False
 
-def create_all_consolidated_tables(create_schedules=True, start_from_letter='a', specific_table=None, company_id_filter=None):
+def create_all_consolidated_tables(create_schedules=True, start_from_letter='a', specific_table=None, company_id_filter=None, only_letter=None):
     """
     Función principal para crear tablas consolidadas
     
     Args:
         create_schedules (bool): Si True, crea scheduled queries para refresh automático
-        start_from_letter (str): Letra inicial para filtrar tablas (útil para reiniciar)
+        start_from_letter (str): Letra inicial para filtrar tablas desde esa letra en adelante (útil para reiniciar)
         specific_table (str): Si se proporciona, genera solo esta tabla
         company_id_filter: Lista [min_id, max_id] para filtrar compañías (None = todas)
+        only_letter (str): Si se proporciona, procesa ÚNICAMENTE las tablas que empiezan con esa letra exacta
         
     Returns:
         dict: Estadísticas de ejecución
@@ -776,8 +777,17 @@ def create_all_consolidated_tables(create_schedules=True, start_from_letter='a',
             print(f"❌ ERROR: La tabla '{specific_table}' no existe")
             sys.exit(1)
     else:
-        # Aplicar filtro de letra inicial
-        available_tables = [t for t in all_tables if t >= start_from_letter]
+        # Aplicar filtro de letra
+        if only_letter:
+            # Modo exclusivo: SOLO las tablas que empiezan con esa letra exacta
+            only_letter_lower = only_letter.lower()
+            available_tables = [t for t in all_tables if t.lower().startswith(only_letter_lower)]
+            print(f"🔍 FILTRO EXCLUSIVO: Procesando SOLO tablas que empiezan con '{only_letter_lower}'")
+        else:
+            # Modo por defecto: desde la letra indicada en adelante
+            available_tables = [t for t in all_tables if t >= start_from_letter]
+            if start_from_letter != 'a':
+                print(f"🔍 FILTRO ACTIVO: Procesando tablas desde '{start_from_letter}'")
         
         # Si está en modo paralelo, dividir las tablas entre tareas
         if is_parallel and not specific_table:
@@ -790,9 +800,6 @@ def create_all_consolidated_tables(create_schedules=True, start_from_letter='a',
             
             available_tables = available_tables[start_idx:end_idx]
             print(f"🔍 FILTRO PARALELO: Tarea {task_index + 1}/{task_count} procesará {len(available_tables)} tablas (índices {start_idx}-{end_idx-1})")
-        
-        if start_from_letter != 'a':
-            print(f"🔍 FILTRO ACTIVO: Procesando tablas desde '{start_from_letter}'")
         
         print(f"📋 Tablas a procesar: {len(available_tables)} de {len(all_tables)} totales")
     
@@ -910,7 +917,8 @@ if __name__ == "__main__":
     # Configurar argumentos de línea de comandos
     parser = argparse.ArgumentParser(description='Crea tablas consolidadas en pph-central.bronze')
     parser.add_argument('--no-schedules', action='store_true', help='No crear Scheduled Queries para refresh automático')
-    parser.add_argument('--start-letter', '-s', default='a', help='Letra inicial para filtrar tablas (default: a)')
+    parser.add_argument('--start-letter', '-s', default='a', help='Letra inicial para filtrar tablas desde esa letra en adelante (default: a)')
+    parser.add_argument('--only-letter', '-l', default=None, help='Procesar ÚNICAMENTE las tablas que empiezan con esta letra exacta')
     parser.add_argument('--table', '-t', help='Procesar solo una tabla específica')
     parser.add_argument('--yes', '-y', action='store_true', help='Responder "sí" a todas las confirmaciones')
     
@@ -920,7 +928,8 @@ if __name__ == "__main__":
         stats = create_all_consolidated_tables(
             create_schedules=not args.no_schedules,
             start_from_letter=args.start_letter,
-            specific_table=args.table
+            specific_table=args.table,
+            only_letter=args.only_letter
         )
         
         if stats['error_count'] > 0:
