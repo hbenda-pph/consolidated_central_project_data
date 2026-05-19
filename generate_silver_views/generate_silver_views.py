@@ -496,11 +496,18 @@ def generate_silver_view_sql_from_metadata(table_name, company_result, layout_de
             # Campo existe - aplicar transformación según tipo
             source_type = company_fields.get(field_name)
             
-            if is_repeated:
-                # Campo REPEATED - convertir a JSON STRING
+            # Usar TO_JSON_STRING si:
+            #   a) el layout lo marca como REPEATED, o
+            #   b) el tipo real de INFORMATION_SCHEMA es ARRAY/STRUCT/RECORD
+            #      (cubre casos donde el metadata no refleja el tipo real de la compañía)
+            source_is_complex = is_complex_type(source_type)
+            
+            if is_repeated or source_is_complex:
+                # Campo REPEATED o tipo complejo - convertir a JSON STRING
                 cast_expression = f"TO_JSON_STRING({field_name})"
                 if DEBUG_MODE:
-                    print(f"    🔍 Campo {field_name}: REPEATED → TO_JSON_STRING")
+                    reason = "is_repeated=True" if is_repeated else f"source_type={source_type}"
+                    print(f"    🔍 Campo {field_name}: [{reason}] → TO_JSON_STRING")
             else:
                 # Campo normal - aplicar cast si es necesario
                 if source_type == target_type:
@@ -795,6 +802,17 @@ def determine_consensus_type(types, type_info_list):
     # SI HAY CUALQUIER DIFERENCIA → STRING
     return 'STRING'
 
+def is_complex_type(data_type):
+    """
+    Detecta si un tipo de dato es complejo (ARRAY, STRUCT, RECORD, JSON).
+    INFORMATION_SCHEMA devuelve tipos completos como 'ARRAY<STRUCT<name STRING, id INT64>>',
+    no strings simples como 'ARRAY', por lo que se usa startswith.
+    """
+    if data_type is None:
+        return False
+    t = str(data_type).strip().upper()
+    return t.startswith('ARRAY') or t.startswith('STRUCT') or t.startswith('RECORD') or t == 'JSON'
+
 def generate_cast_for_field(field_name, source_type, target_type):
     """
     Genera la expresión CAST apropiada para un campo
@@ -805,11 +823,11 @@ def generate_cast_for_field(field_name, source_type, target_type):
     
     # Si el target es STRING, SIEMPRE hacer CAST simple
     if target_type == 'STRING':
-        # Casos especiales para tipos complejos
-        if source_type == 'JSON':
-            return f"COALESCE(TO_JSON_STRING({field_name}), '')"
-        elif source_type in ['STRUCT', 'ARRAY', 'RECORD']:
-            return f"COALESCE(TO_JSON_STRING({field_name}), '')"
+        # Casos especiales para tipos complejos (JSON, STRUCT, ARRAY, RECORD)
+        # INFORMACIÓN SCHEMA devuelve tipos como 'ARRAY<STRUCT<...>>' (con la definición completa)
+        # así que se usa is_complex_type() en lugar de comparación exacta
+        if is_complex_type(source_type):
+            return f"TO_JSON_STRING({field_name})"
         else:
             # Para todos los demás tipos, CAST simple a STRING
             return f"CAST({field_name} AS STRING)"

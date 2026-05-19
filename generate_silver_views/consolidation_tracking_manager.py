@@ -72,8 +72,8 @@ class ConsolidationTrackingManager:
             if existing.empty:
                 # Insertar nuevo registro
                 # Escapar comillas en strings para SQL
-                safe_error_message = error_message.replace("'", "''") if error_message else None
-                safe_notes = notes.replace("'", "''") if notes else None
+                safe_error_message = error_message.replace("'", "''").replace("\n", " ") if error_message else None
+                safe_notes = notes.replace("'", "''").replace("\n", " ") if notes else None
                 
                 insert_query = f"""
                 INSERT INTO `{self.table_id}` 
@@ -84,9 +84,8 @@ class ConsolidationTrackingManager:
                 """
             else:
                 # Actualizar registro existente
-                # Escapar comillas en strings para SQL
-                safe_error_message = error_message.replace("'", "''") if error_message else None
-                safe_notes = notes.replace("'", "''") if notes else None
+                safe_error_message = error_message.replace("'", "''").replace("\n", " ") if error_message else None
+                safe_notes = notes.replace("'", "''").replace("\n", " ") if notes else None
                 
                 update_query = f"""
                 UPDATE `{self.table_id}`
@@ -97,6 +96,7 @@ class ConsolidationTrackingManager:
                 WHERE company_id = {company_id} AND table_name = '{table_name}'
                 """
                 insert_query = update_query
+
             
             self.client.query(insert_query).result()
             return True
