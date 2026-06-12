@@ -151,6 +151,7 @@ def get_companies_for_table(table_name, company_id_filter=None):
           AND c.company_fivetran_status = TRUE
           AND c.company_bigquery_status = TRUE
           AND c.company_project_id IS NOT NULL
+          AND c.company_consolidated_status = 0
           {company_filter}
         ORDER BY c.company_id
     """
@@ -485,19 +486,19 @@ def create_consolidated_table(table_name, companies_df, metadata_dict):
             print(f"{'='*80}\n")
             # NO retornar False - continuar para crear la tabla sin partición
     
-    # Validar que todas las vistas tienen el mismo esquema
-    print(f"  🔍 Validando esquemas de vistas Silver...")
-    is_valid, reference_schema, schema_errors = validate_silver_view_schemas(table_name, companies_df)
-    
-    if not is_valid:
-        print(f"  ⚠️  ADVERTENCIA: Diferencias en esquemas detectadas:")
-        for error in schema_errors[:5]:  # Mostrar máximo 5 errores
-            print(f"     - {error}")
-        if len(schema_errors) > 5:
-            print(f"     ... y {len(schema_errors) - 5} más")
-        print(f"  💡 Las vistas Silver deben tener el mismo esquema para UNION ALL")
-        print(f"  💡 Ejecuta 'generate_silver_views.py' para regenerar vistas con layouts consistentes")
-        # Continuar de todas formas - puede que funcione si las diferencias son menores
+    # NOTA: La validación dinámica de esquemas fue comentada porque el layout 
+    # ya fue definido y optimizado por analysis_silver_views.py en metadatos.
+    # print(f"  🔍 Validando esquemas de vistas Silver...")
+    # is_valid, reference_schema, schema_errors = validate_silver_view_schemas(table_name, companies_df)
+    # 
+    # if not is_valid:
+    #     print(f"  ⚠️  ADVERTENCIA: Diferencias en esquemas detectadas:")
+    #     for error in schema_errors[:5]:
+    #         print(f"     - {error}")
+    #     if len(schema_errors) > 5:
+    #         print(f"     ... y {len(schema_errors) - 5} más")
+    #     print(f"  💡 Las vistas Silver deben tener el mismo esquema para UNION ALL")
+    #     print(f"  💡 Ejecuta 'generate_silver_views.py' para regenerar vistas con layouts consistentes")
     
     # Construir UNION ALL con metadata de compañía.
     # Usamos lista explícita de campos desde silver_layout_definition para que el UNION ALL
